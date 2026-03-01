@@ -82,6 +82,24 @@ class TestDrive:
         d.satisfy(0.1)
         assert abs(d.satiety - 0.3) < 1e-9
 
+    def test_satiety_integration_drive_recovery_is_gradual(self):
+        """After satisfying hunger, drive should recover much slower initially."""
+        d = Drive(DriveType.HUNGER, level=0.5, rate=0.05, satiety_decay_rate=0.05)
+        d.satisfy(0.4)
+        # After satisfying: level=0.1, satiety=0.4
+
+        # Run 20 ticks and record drive levels
+        levels = []
+        for _ in range(20):
+            d.update()
+            levels.append(d.level)
+
+        # First few ticks: very slow growth (satiety suppressing)
+        early_growth = levels[4] - 0.1  # growth over first 5 ticks
+        # Last few ticks: faster growth (satiety worn off)
+        late_growth = levels[19] - levels[14]  # growth over last 5 ticks
+        assert late_growth > early_growth, "Drive growth should accelerate as satiety wears off"
+
 
 class TestDriveSystem:
     def test_creation_with_drives(self):
