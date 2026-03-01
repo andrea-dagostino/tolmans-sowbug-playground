@@ -1,6 +1,6 @@
-from some_sim.analysis.recorder import Recorder
-from some_sim.core.agent import Agent
-from some_sim.core.environment import Environment
+from tolmans_sowbug_playground.analysis.recorder import Recorder
+from tolmans_sowbug_playground.core.agent import Agent
+from tolmans_sowbug_playground.core.environment import Environment
 
 
 class Simulation:

@@ -1,6 +1,6 @@
 from enum import Enum
 
-from some_sim.core.environment import Environment
+from tolmans_sowbug_playground.core.environment import Environment
 
 
 class Direction(Enum):

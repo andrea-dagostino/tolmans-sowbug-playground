@@ -1,5 +1,5 @@
 [project]
-name = "some-sim"
+name = "tolmans-sowbug-playground"
 version = "0.1.0"
 description = "A research platform for studying psychological phenomena via agent-based simulation"
 readme = "README.md"
@@ -19,14 +19,14 @@ dev = [
 ]
 
 [project.scripts]
-some-sim = "some_sim.__main__:main"
+tolmans-sowbug-playground = "tolmans_sowbug_playground.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/some_sim"]
+packages = ["src/tolmans_sowbug_playground"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

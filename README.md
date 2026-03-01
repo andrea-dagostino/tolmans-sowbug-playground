@@ -24,11 +24,10 @@ Built for researchers and devs interested in computational psychology, agent-bas
 # clone and install
 git clone https://github.com/andrea-dagostino/tolmans-sowbug-playground.git
 cd tolmans-sowbug-playground
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+uv sync
 
 # launch the web UI
-some-sim serve --config configs/sowbug_basic.yaml --port 8000
+uv run tolmans-sowbug-playground serve --config configs/sowbug_basic.yaml --port 8000
 # open http://localhost:8000
 ```
 
@@ -36,21 +35,21 @@ some-sim serve --config configs/sowbug_basic.yaml --port 8000
 
 ```bash
 # run a headless simulation
-some-sim run --config configs/sowbug_basic.yaml --ticks 2000 --output results/run1
+uv run tolmans-sowbug-playground run --config configs/sowbug_basic.yaml --ticks 2000 --output results/run1
 
 # generate analysis plots
-some-sim analyze --input results/run1.json --plot drives
-some-sim analyze --input results/run1.json --plot heatmap
-some-sim analyze --input results/run1.json --plot learning
+uv run tolmans-sowbug-playground analyze --input results/run1.json --plot drives
+uv run tolmans-sowbug-playground analyze --input results/run1.json --plot heatmap
+uv run tolmans-sowbug-playground analyze --input results/run1.json --plot learning
 
 # run tests
-pytest
+uv run pytest
 ```
 
 ## Project Structure
 
 ```
-src/some_sim/
+src/tolmans_sowbug_playground/
 ├── core/           # simulation engine, grid world, stimulus model, config
 ├── agents/         # sowbug implementation (decision logic)
 ├── systems/        # drives, sensors, memory (cognitive map + KDE), motor

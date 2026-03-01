@@ -1,7 +1,7 @@
 import numpy as np
 
-from some_sim.core.stimulus import StimulusType
-from some_sim.systems.memory import MemoryEntry, MemorySystem
+from tolmans_sowbug_playground.core.stimulus import StimulusType
+from tolmans_sowbug_playground.systems.memory import MemoryEntry, MemorySystem
 
 
 class TestMemoryEntry:

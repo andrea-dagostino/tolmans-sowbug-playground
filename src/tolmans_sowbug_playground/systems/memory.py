@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from some_sim.core.stimulus import StimulusType
+from tolmans_sowbug_playground.core.stimulus import StimulusType
 
 
 @dataclass

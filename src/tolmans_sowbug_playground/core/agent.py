@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 
-from some_sim.core.environment import Environment
-from some_sim.systems.drives import DriveSystem
-from some_sim.systems.memory import MemorySystem
-from some_sim.systems.motor import Direction, MotorSystem
-from some_sim.systems.sensors import Perception, SensorSystem
+from tolmans_sowbug_playground.core.environment import Environment
+from tolmans_sowbug_playground.systems.drives import DriveSystem
+from tolmans_sowbug_playground.systems.memory import MemorySystem
+from tolmans_sowbug_playground.systems.motor import Direction, MotorSystem
+from tolmans_sowbug_playground.systems.sensors import Perception, SensorSystem
 
 
 class Agent(ABC):

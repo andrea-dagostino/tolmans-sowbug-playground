@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 
-from some_sim.systems.drives import DriveType
+from tolmans_sowbug_playground.systems.drives import DriveType
 
 
 def _extract_agent_data(records: list[dict], agent_index: int = 0):

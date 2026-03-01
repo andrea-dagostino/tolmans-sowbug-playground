@@ -3,13 +3,13 @@ matplotlib.use("Agg")
 
 from matplotlib.figure import Figure
 
-from some_sim.analysis.plots import (
+from tolmans_sowbug_playground.analysis.plots import (
     plot_drive_levels,
     plot_exploration_heatmap,
     plot_learning_curve,
     plot_path_efficiency,
 )
-from some_sim.systems.drives import DriveType
+from tolmans_sowbug_playground.systems.drives import DriveType
 
 
 def _make_records(n=50):

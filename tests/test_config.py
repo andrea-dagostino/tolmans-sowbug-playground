@@ -2,7 +2,7 @@ import tempfile
 
 import yaml
 
-from some_sim.core.config import SimulationConfig, load_config, build_simulation
+from tolmans_sowbug_playground.core.config import SimulationConfig, load_config, build_simulation
 
 
 VALID_CONFIG = {

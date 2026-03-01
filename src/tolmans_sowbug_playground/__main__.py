@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from some_sim.core.config import build_simulation, load_config
+from tolmans_sowbug_playground.core.config import build_simulation, load_config
 
 
 def cmd_run(args):
@@ -21,7 +21,7 @@ def cmd_run(args):
 
 def cmd_serve(args):
     print("Starting web server...")
-    from some_sim.web.server import start_server
+    from tolmans_sowbug_playground.web.server import start_server
 
     config = load_config(args.config) if args.config else None
     start_server(config=config, port=args.port)
@@ -30,7 +30,7 @@ def cmd_serve(args):
 def cmd_analyze(args):
     import json
 
-    from some_sim.analysis.plots import (
+    from tolmans_sowbug_playground.analysis.plots import (
         plot_drive_levels,
         plot_exploration_heatmap,
         plot_learning_curve,
@@ -64,7 +64,7 @@ def cmd_analyze(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="some-sim",
+        prog="tolmans-sowbug-playground",
         description="Schematic Sowbug simulation platform",
     )
     subparsers = parser.add_subparsers(dest="command")

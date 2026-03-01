@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from some_sim.core.stimulus import Stimulus, StimulusType
+from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 
 
 @dataclass

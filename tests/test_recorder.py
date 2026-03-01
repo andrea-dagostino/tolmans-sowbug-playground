@@ -2,10 +2,10 @@ import csv
 import json
 import tempfile
 
-from some_sim.agents.sowbug import Sowbug
-from some_sim.analysis.recorder import Recorder
-from some_sim.core.environment import Environment
-from some_sim.core.stimulus import Stimulus, StimulusType
+from tolmans_sowbug_playground.agents.sowbug import Sowbug
+from tolmans_sowbug_playground.analysis.recorder import Recorder
+from tolmans_sowbug_playground.core.environment import Environment
+from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 
 
 class TestRecorder:

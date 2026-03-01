@@ -2,9 +2,9 @@ import csv
 import json
 from enum import Enum
 
-from some_sim.core.agent import Agent
-from some_sim.core.environment import Environment
-from some_sim.systems.drives import DriveType
+from tolmans_sowbug_playground.core.agent import Agent
+from tolmans_sowbug_playground.core.environment import Environment
+from tolmans_sowbug_playground.systems.drives import DriveType
 
 
 def _make_json_safe(obj):

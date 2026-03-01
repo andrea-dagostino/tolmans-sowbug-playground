@@ -1,9 +1,9 @@
 import random
 
-from some_sim.agents.sowbug import Sowbug
-from some_sim.core.environment import Environment
-from some_sim.core.stimulus import Stimulus, StimulusType
-from some_sim.systems.drives import DriveType
+from tolmans_sowbug_playground.agents.sowbug import Sowbug
+from tolmans_sowbug_playground.core.environment import Environment
+from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
+from tolmans_sowbug_playground.systems.drives import DriveType
 
 
 class TestSowbugCreation:
@@ -304,7 +304,7 @@ class TestSowbugVTE:
 
         env = Environment(width=20, height=20)
         bug.perceive(env)
-        from some_sim.systems.motor import Direction
+        from tolmans_sowbug_playground.systems.motor import Direction
         direction = bug.decide()
         assert direction == Direction.STAY
         assert bug._vte_hesitated is True
@@ -330,7 +330,7 @@ class TestSowbugVTE:
         bug.perceive(env)
         direction = bug.decide()
         # East has food, should be chosen (after aversion check)
-        from some_sim.systems.motor import Direction
+        from tolmans_sowbug_playground.systems.motor import Direction
         assert direction == Direction.EAST
 
 

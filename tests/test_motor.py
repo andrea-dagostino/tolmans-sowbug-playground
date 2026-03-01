@@ -1,6 +1,6 @@
-from some_sim.core.environment import Environment
-from some_sim.core.stimulus import Stimulus, StimulusType
-from some_sim.systems.motor import Direction, MotorSystem
+from tolmans_sowbug_playground.core.environment import Environment
+from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
+from tolmans_sowbug_playground.systems.motor import Direction, MotorSystem
 
 
 class TestDirection:

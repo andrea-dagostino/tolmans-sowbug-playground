@@ -1,4 +1,4 @@
-from some_sim.systems.drives import Drive, DriveSystem, DriveType
+from tolmans_sowbug_playground.systems.drives import Drive, DriveSystem, DriveType
 
 
 class TestDriveType:

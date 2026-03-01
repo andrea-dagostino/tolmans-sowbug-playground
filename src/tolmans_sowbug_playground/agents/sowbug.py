@@ -1,12 +1,12 @@
 import random
 
-from some_sim.core.agent import Agent
-from some_sim.core.environment import Environment
-from some_sim.core.stimulus import StimulusType
-from some_sim.systems.drives import Drive, DriveSystem, DriveType
-from some_sim.systems.memory import MemorySystem
-from some_sim.systems.motor import Direction, MotorSystem
-from some_sim.systems.sensors import Perception, SensorSystem
+from tolmans_sowbug_playground.core.agent import Agent
+from tolmans_sowbug_playground.core.environment import Environment
+from tolmans_sowbug_playground.core.stimulus import StimulusType
+from tolmans_sowbug_playground.systems.drives import Drive, DriveSystem, DriveType
+from tolmans_sowbug_playground.systems.memory import MemorySystem
+from tolmans_sowbug_playground.systems.motor import Direction, MotorSystem
+from tolmans_sowbug_playground.systems.sensors import Perception, SensorSystem
 
 DRIVE_STIMULUS_MAP = {
     DriveType.HUNGER: StimulusType.FOOD,
@@ -119,7 +119,21 @@ class Sowbug(Agent):
                 strongest = max(relevant, key=lambda p: p.perceived_intensity)
                 return self._direction_toward(strongest.stimulus.position)
 
-        return random.choice(MOVE_DIRECTIONS)
+        # Prefer directions leading to unvisited or less-familiar cells
+        candidates = []
+        for direction in MOVE_DIRECTIONS:
+            dx, dy = direction.value
+            nx, ny = self.position[0] + dx, self.position[1] + dy
+            if 0 <= nx < self._grid_size[0] and 0 <= ny < self._grid_size[1]:
+                familiarity = self.memory_system.visited.get((nx, ny), 0.0)
+                candidates.append((direction, familiarity))
+
+        if not candidates:
+            return random.choice(MOVE_DIRECTIONS)
+
+        min_familiarity = min(f for _, f in candidates)
+        least_familiar = [d for d, f in candidates if f == min_familiarity]
+        return random.choice(least_familiar)
 
     def _get_avg_memory_strength(self, stimulus_type: StimulusType) -> float:
         strengths = []

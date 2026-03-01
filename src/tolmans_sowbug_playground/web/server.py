@@ -7,9 +7,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from some_sim.analysis.recorder import _make_json_safe
-from some_sim.core.config import SimulationConfig, StimulusConfig, build_simulation
-from some_sim.core.simulation import Simulation
+from tolmans_sowbug_playground.analysis.recorder import _make_json_safe
+from tolmans_sowbug_playground.core.config import SimulationConfig, StimulusConfig, build_simulation
+from tolmans_sowbug_playground.core.simulation import Simulation
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -110,7 +110,7 @@ async def websocket_endpoint(ws: WebSocket):
                         )
                 elif action == "add_stimulus":
                     if _simulation:
-                        from some_sim.core.stimulus import Stimulus, StimulusType
+                        from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 
                         stim_type = StimulusType(data["stimulus_type"])
                         _simulation.environment.add_stimulus(
