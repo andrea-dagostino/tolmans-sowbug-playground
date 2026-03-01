@@ -22,18 +22,19 @@ header {
 header h1 { font-size: 1rem; font-weight: 600; }
 #tick-counter { font-family: monospace; font-size: 0.85rem; color: #666; }
 
-/* ---- Three-column grid: canvas auto, sidebars split the rest ---- */
+/* ---- Two-column layout: env 80%, sidebar 20% ---- */
 main {
     display: grid;
-    grid-template-columns: auto 1fr 1fr;
+    grid-template-columns: 4fr 1fr;
     gap: 0.75rem;
     align-items: start;
 }
 
-/* Col 1: Environment */
+/* Left column: Environment + Monitoring */
 #env-column {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 
 #grid-container {
@@ -42,19 +43,10 @@ main {
     border-radius: 4px;
     padding: 3px;
     line-height: 0;
+    width: fit-content;
 }
 
 #grid-canvas { display: block; cursor: crosshair; }
-
-#chart-canvas {
-    width: 100%;
-    height: 100px;
-    background: white;
-    border: 1px solid #ccc;
-    border-top: none;
-    border-radius: 0;
-    display: block;
-}
 
 /* Toolbar sits flush under canvas, same width */
 #env-toolbar {
@@ -67,6 +59,7 @@ main {
     align-items: center;
     gap: 0.6rem;
     flex-wrap: wrap;
+    width: fit-content;
 }
 
 #env-toolbar select {
@@ -121,9 +114,33 @@ main {
     margin-left: auto;
 }
 
-/* ---- Sidebar columns ---- */
-#tracing-column,
-#config-column {
+/* ---- Monitoring charts ---- */
+#monitoring {
+    margin-top: 0.75rem;
+}
+
+.chart-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: #bbb;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.2rem;
+}
+
+#drive-chart-canvas,
+#coverage-chart-canvas {
+    width: 100%;
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 3px;
+    display: block;
+}
+#drive-chart-canvas { height: 160px; }
+#coverage-chart-canvas { height: 120px; }
+
+/* ---- Right sidebar ---- */
+#sidebar {
     min-width: 0;
     max-height: calc(100vh - 80px);
     overflow-y: auto;
@@ -133,10 +150,8 @@ main {
     gap: 0.5rem;
 }
 
-#tracing-column::-webkit-scrollbar,
-#config-column::-webkit-scrollbar { width: 4px; }
-#tracing-column::-webkit-scrollbar-thumb,
-#config-column::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+#sidebar::-webkit-scrollbar { width: 4px; }
+#sidebar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
 
 /* Shared section card style */
 .panel {
@@ -175,12 +190,21 @@ main {
 /* ---- Drives ---- */
 .drive-bar { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.25rem; }
 .drive-bar label { width: 68px; font-size: 0.75rem; color: #555; flex-shrink: 0; }
-.bar-bg { flex: 1; height: 10px; background: #eee; border-radius: 3px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+.bar-bg { flex: 1; height: 10px; background: #eee; border-radius: 3px; overflow: hidden; position: relative; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s, background-color 0.3s; }
 .bar-fill.hunger { background: #4CAF50; }
 .bar-fill.thirst { background: #2196F3; }
 .bar-fill.temperature { background: #F44336; }
-.drive-bar span:last-child { width: 30px; font-size: 0.7rem; font-family: monospace; text-align: right; color: #666; }
+.bar-bg .threshold-marker {
+    position: absolute;
+    top: 0;
+    left: 80%;
+    width: 2px;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+}
+.drive-bar span:last-child { width: 30px; font-size: 0.7rem; font-family: monospace; text-align: right; color: #666; transition: color 0.3s; }
 
 /* ---- Agent info ---- */
 #info p { font-size: 0.8rem; margin-bottom: 0.1rem; color: #555; }
@@ -199,13 +223,7 @@ main {
 .toggle-label input { cursor: pointer; }
 
 /* ---- Perceptions ---- */
-#perception-list {
-    max-height: 110px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-}
-#perception-list::-webkit-scrollbar { width: 4px; }
-#perception-list::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+#perception-list {}
 
 .perception-item {
     display: flex;

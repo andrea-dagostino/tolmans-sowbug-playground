@@ -13,12 +13,11 @@
             <span id="tick-counter">Tick: 0</span>
         </header>
         <main>
-            <!-- Col 1: Environment -->
+            <!-- Left column: Environment + Monitoring -->
             <div id="env-column">
                 <div id="grid-container">
                     <canvas id="grid-canvas" width="600" height="600"></canvas>
                 </div>
-                <canvas id="chart-canvas" height="100"></canvas>
                 <div id="env-toolbar">
                     <select id="preset-select">
                         <option value="">Custom</option>
@@ -41,24 +40,148 @@
                     </select>
                     <span class="hint">L-click place / R-click remove</span>
                 </div>
+                <div class="panel" id="monitoring">
+                    <h2>Monitoring</h2>
+                        <h3 class="chart-label">Drives over time</h3>
+                    <canvas id="drive-chart-canvas" height="160"></canvas>
+                    <h3 class="chart-label">Prediction Accuracy</h3>
+                    <canvas id="coverage-chart-canvas" height="120"></canvas>
+                    <details class="panel-help">
+                        <summary>?</summary>
+                        <dl>
+                            <dt>Drive Chart</dt>
+                            <dd>Plots the drive level for hunger, thirst and temperature over simulation ticks. Drives rise at a fixed rate and drop when the agent reaches the matching stimulus.</dd>
+                            <dt>Prediction Accuracy</dt>
+                            <dd>Cumulative accuracy of the agent's expectations vs. reality. Each time the agent updates a memory, the pre-update error is recorded. Accuracy = 1 - (cumulative error / prediction count). Trends upward as the agent learns.</dd>
+                        </dl>
+                    </details>
+                </div>
             </div>
 
-            <!-- Col 2: Tracing & Logging -->
-            <aside id="tracing-column">
+            <!-- Right column: Config, Params & Tracing -->
+            <aside id="sidebar">
+                <div class="panel" id="controls">
+                    <h2>Controls</h2>
+                    <div id="btn-group">
+                        <button id="btn-play">Play</button>
+                        <button id="btn-pause">Pause</button>
+                        <button id="btn-step">Step</button>
+                        <button id="btn-reset">Reset</button>
+                    </div>
+                    <div id="speed-control">
+                        <label>Speed: <span id="speed-val">5</span> tps
+                            <input type="range" id="speed-slider" min="1" max="30" value="5">
+                        </label>
+                    </div>
+                </div>
+                <div class="panel" id="drives">
+                    <h2>Drives</h2>
+                    <div class="drive-bar">
+                        <label>Hunger</label>
+                        <div class="bar-bg"><div id="bar-hunger" class="bar-fill hunger"></div><div class="threshold-marker"></div></div>
+                        <span id="val-hunger">0.00</span>
+                    </div>
+                    <div class="drive-bar">
+                        <label>Thirst</label>
+                        <div class="bar-bg"><div id="bar-thirst" class="bar-fill thirst"></div><div class="threshold-marker"></div></div>
+                        <span id="val-thirst">0.00</span>
+                    </div>
+                    <div class="drive-bar">
+                        <label>Temperature</label>
+                        <div class="bar-bg"><div id="bar-temperature" class="bar-fill temperature"></div><div class="threshold-marker"></div></div>
+                        <span id="val-temperature">0.00</span>
+                    </div>
+                    <details class="panel-help">
+                        <summary>?</summary>
+                        <dl>
+                            <dt>Drives</dt>
+                            <dd>Internal motivational states that rise each tick at a fixed rate and bias the agent toward relevant stimuli.</dd>
+                            <dt>Hunger</dt>
+                            <dd>Satisfied by food. The most urgent drive determines which stimulus the agent seeks.</dd>
+                            <dt>Thirst</dt>
+                            <dd>Satisfied by water. Same priority logic as hunger.</dd>
+                            <dt>Temperature</dt>
+                            <dd>Satisfied by heat sources. Rises at a slower default rate.</dd>
+                            <dt>Phototaxis</dt>
+                            <dd>When drives are low, the agent is drawn toward light. High drives suppress this tendency.</dd>
+                        </dl>
+                    </details>
+                </div>
+                <div class="panel" id="overlays">
+                    <h2>Overlays</h2>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggle-cogmap" checked>
+                        Cognitive Map
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggle-perception" checked>
+                        Perception
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggle-density" checked>
+                        Density Field
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggle-vte" checked>
+                        VTE Arrows
+                    </label>
+                    <details class="panel-help">
+                        <summary>?</summary>
+                        <dl>
+                            <dt>Cognitive Map</dt>
+                            <dd>Diamond markers at remembered stimulus locations, connected by purple edge lines. Opacity reflects memory strength.</dd>
+                            <dt>Perception</dt>
+                            <dd>Dashed sensory radius circle and lines to detected stimuli, colored by type.</dd>
+                            <dt>Density Field</dt>
+                            <dd>KDE heatmap of reward-weighted experience. Brighter cells have more accumulated value.</dd>
+                            <dt>VTE Arrows</dt>
+                            <dd>Directional arrows showing simulated reward per direction. Purple = decided, magenta = deliberating. Arrow length = relative value.</dd>
+                        </dl>
+                    </details>
+                </div>
                 <div class="panel" id="perceptions">
                     <h2>Perceptions</h2>
                     <div id="perception-list">
-                        <p class="empty-state">No perceptions yet</p>
+                        <div class="perception-item" data-stim="food">
+                            <span class="dot" style="background:#4CAF50"></span>
+                            <span class="type-label">food</span>
+                            <span class="intensity" id="perc-food">0%</span>
+                            <span class="distance" id="perc-food-dist">-</span>
+                        </div>
+                        <div class="perception-item" data-stim="water">
+                            <span class="dot" style="background:#2196F3"></span>
+                            <span class="type-label">water</span>
+                            <span class="intensity" id="perc-water">0%</span>
+                            <span class="distance" id="perc-water-dist">-</span>
+                        </div>
+                        <div class="perception-item" data-stim="light">
+                            <span class="dot" style="background:#FFEB3B"></span>
+                            <span class="type-label">light</span>
+                            <span class="intensity" id="perc-light">0%</span>
+                            <span class="distance" id="perc-light-dist">-</span>
+                        </div>
+                        <div class="perception-item" data-stim="heat">
+                            <span class="dot" style="background:#F44336"></span>
+                            <span class="type-label">heat</span>
+                            <span class="intensity" id="perc-heat">0%</span>
+                            <span class="distance" id="perc-heat-dist">-</span>
+                        </div>
+                        <div class="perception-item" data-stim="obstacle">
+                            <span class="dot" style="background:#424242"></span>
+                            <span class="type-label">obstacle</span>
+                            <span class="intensity" id="perc-obstacle">0%</span>
+                            <span class="distance" id="perc-obstacle-dist">-</span>
+                        </div>
                     </div>
                     <details class="panel-help">
                         <summary>?</summary>
                         <dl>
                             <dt>Perception</dt>
-                            <dd>A stimulus detected within the agent's sensory radius.</dd>
+                            <dd>All stimulus types are shown. Intensity and distance update when a stimulus is within the agent's sensory radius; otherwise they stay at 0% / -.</dd>
                             <dt>Intensity %</dt>
-                            <dd>Perceived strength, decays linearly from 100% at the source to 0% at the radius edge.</dd>
+                            <dd>Highest perceived strength for that type. Decays linearly from 100% at the source to 0% at the radius edge.</dd>
                             <dt>Distance</dt>
-                            <dd>Euclidean distance from the agent to the stimulus in grid cells.</dd>
+                            <dd>Euclidean distance to the closest detected stimulus of that type, in grid cells.</dd>
                         </dl>
                     </details>
                 </div>
@@ -119,89 +242,6 @@
                             <dd>The agent's current (x, y) cell on the grid.</dd>
                             <dt>Orientation</dt>
                             <dd>The direction the agent last moved (N/S/E/W), shown as a heading line on the agent circle.</dd>
-                        </dl>
-                    </details>
-                </div>
-            </aside>
-
-            <!-- Col 3: Config & Params -->
-            <aside id="config-column">
-                <div class="panel" id="controls">
-                    <h2>Controls</h2>
-                    <div id="btn-group">
-                        <button id="btn-play">Play</button>
-                        <button id="btn-pause">Pause</button>
-                        <button id="btn-step">Step</button>
-                        <button id="btn-reset">Reset</button>
-                    </div>
-                    <div id="speed-control">
-                        <label>Speed: <span id="speed-val">5</span> tps
-                            <input type="range" id="speed-slider" min="1" max="30" value="5">
-                        </label>
-                    </div>
-                </div>
-                <div class="panel" id="drives">
-                    <h2>Drives</h2>
-                    <div class="drive-bar">
-                        <label>Hunger</label>
-                        <div class="bar-bg"><div id="bar-hunger" class="bar-fill hunger"></div></div>
-                        <span id="val-hunger">0.00</span>
-                    </div>
-                    <div class="drive-bar">
-                        <label>Thirst</label>
-                        <div class="bar-bg"><div id="bar-thirst" class="bar-fill thirst"></div></div>
-                        <span id="val-thirst">0.00</span>
-                    </div>
-                    <div class="drive-bar">
-                        <label>Temperature</label>
-                        <div class="bar-bg"><div id="bar-temperature" class="bar-fill temperature"></div></div>
-                        <span id="val-temperature">0.00</span>
-                    </div>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Drives</dt>
-                            <dd>Internal motivational states that rise each tick at a fixed rate and bias the agent toward relevant stimuli.</dd>
-                            <dt>Hunger</dt>
-                            <dd>Satisfied by food. The most urgent drive determines which stimulus the agent seeks.</dd>
-                            <dt>Thirst</dt>
-                            <dd>Satisfied by water. Same priority logic as hunger.</dd>
-                            <dt>Temperature</dt>
-                            <dd>Satisfied by heat sources. Rises at a slower default rate.</dd>
-                            <dt>Phototaxis</dt>
-                            <dd>When drives are low, the agent is drawn toward light. High drives suppress this tendency.</dd>
-                        </dl>
-                    </details>
-                </div>
-                <div class="panel" id="overlays">
-                    <h2>Overlays</h2>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-cogmap" checked>
-                        Cognitive Map
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-perception" checked>
-                        Perception
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-density" checked>
-                        Density Field
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-vte" checked>
-                        VTE Arrows
-                    </label>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Cognitive Map</dt>
-                            <dd>Diamond markers at remembered stimulus locations, connected by purple edge lines. Opacity reflects memory strength.</dd>
-                            <dt>Perception</dt>
-                            <dd>Dashed sensory radius circle and lines to detected stimuli, colored by type.</dd>
-                            <dt>Density Field</dt>
-                            <dd>KDE heatmap of reward-weighted experience. Brighter cells have more accumulated value.</dd>
-                            <dt>VTE Arrows</dt>
-                            <dd>Directional arrows showing simulated reward per direction. Purple = decided, magenta = deliberating. Arrow length = relative value.</dd>
                         </dl>
                     </details>
                 </div>

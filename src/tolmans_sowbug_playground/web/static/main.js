@@ -23,8 +23,9 @@ const COLORS = {
 
 let ws = null;
 let latestState = null;
-let coverageHistory = [];
+let accuracyHistory = [];
 let lastRecordedTick = -1;
+let driveHistory = [];
 let showCognitiveMap = true;
 let showPerception = true;
 let showDensityField = true;
@@ -65,19 +66,31 @@ function connectWebSocket() {
             }
         }
 
-        // Track coverage history
+        // Track accuracy history
         const tick = latestState.tick || 0;
         if (tick <= lastRecordedTick) {
-            coverageHistory = [];
+            accuracyHistory = [];
+            driveHistory = [];
         }
         lastRecordedTick = tick;
         if (latestState.agents && latestState.agents.length > 0) {
             const agent = latestState.agents[0];
-            const visited = agent.visited_cells ? Object.keys(agent.visited_cells).length : 0;
-            const total = gridWidth * gridHeight;
-            coverageHistory.push({ tick, coverage: visited / total });
+            const accuracy = agent.prediction_accuracy != null ? agent.prediction_accuracy : 0;
+            accuracyHistory.push({ tick, accuracy });
+
+            // Track drive levels
+            const drives = agent.drive_levels || {};
+            const entry = { tick, hunger: 0, thirst: 0, temperature: 0 };
+            for (const [k, v] of Object.entries(drives)) {
+                const kl = k.toLowerCase();
+                if (kl.includes("hunger")) entry.hunger = v;
+                else if (kl.includes("thirst")) entry.thirst = v;
+                else if (kl.includes("temperature")) entry.temperature = v;
+            }
+            driveHistory.push(entry);
         }
         renderChart();
+        renderDriveChart();
 
         render(latestState);
         updateDashboard(latestState);
@@ -317,10 +330,11 @@ function renderVTE(state) {
     }
 }
 
-// --- Coverage chart ---
+// --- Prediction accuracy chart ---
 
 function renderChart() {
-    const chartCanvas = document.getElementById("chart-canvas");
+    const chartCanvas = document.getElementById("coverage-chart-canvas");
+    if (!chartCanvas) return;
     const cCtx = chartCanvas.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
     const rect = chartCanvas.getBoundingClientRect();
@@ -353,12 +367,25 @@ function renderChart() {
         cCtx.fillText(`${pct}%`, pad.left - 4, y);
     }
 
+    // Rotated Y-axis label
+    cCtx.save();
+    cCtx.fillStyle = "#888";
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.translate(8, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText("Pred. Accuracy", 0, 0);
+    cCtx.restore();
+
     // X-axis label
     cCtx.textAlign = "center";
     cCtx.textBaseline = "top";
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
     cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
 
-    if (coverageHistory.length < 2) {
+    if (accuracyHistory.length < 2) {
         // Axis frame only
         cCtx.strokeStyle = "#ccc";
         cCtx.lineWidth = 1;
@@ -370,8 +397,8 @@ function renderChart() {
         return;
     }
 
-    const minTick = coverageHistory[0].tick;
-    const maxTick = coverageHistory[coverageHistory.length - 1].tick;
+    const minTick = accuracyHistory[0].tick;
+    const maxTick = accuracyHistory[accuracyHistory.length - 1].tick;
     const tickRange = maxTick - minTick || 1;
 
     // X-axis tick labels
@@ -393,27 +420,130 @@ function renderChart() {
     cCtx.lineTo(pad.left + plotW, pad.top + plotH);
     cCtx.stroke();
 
-    // Coverage line
-    cCtx.strokeStyle = "#7C4DFF";
+    // Accuracy line
+    cCtx.strokeStyle = "#00897B";
     cCtx.lineWidth = 1.5;
     cCtx.beginPath();
-    for (let i = 0; i < coverageHistory.length; i++) {
-        const d = coverageHistory[i];
+    for (let i = 0; i < accuracyHistory.length; i++) {
+        const d = accuracyHistory[i];
         const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
-        const y = pad.top + plotH - d.coverage * plotH;
+        const y = pad.top + plotH - d.accuracy * plotH;
         if (i === 0) cCtx.moveTo(x, y);
         else cCtx.lineTo(x, y);
     }
     cCtx.stroke();
 
     // Fill under the line
-    const last = coverageHistory[coverageHistory.length - 1];
+    const last = accuracyHistory[accuracyHistory.length - 1];
     const lastX = pad.left + ((last.tick - minTick) / tickRange) * plotW;
     cCtx.lineTo(lastX, pad.top + plotH);
     cCtx.lineTo(pad.left, pad.top + plotH);
     cCtx.closePath();
-    cCtx.fillStyle = "rgba(124, 77, 255, 0.08)";
+    cCtx.fillStyle = "rgba(0, 137, 123, 0.08)";
     cCtx.fill();
+}
+
+// --- Drive monitoring chart ---
+
+function renderDriveChart() {
+    const chartCanvas = document.getElementById("drive-chart-canvas");
+    if (!chartCanvas) return;
+    const cCtx = chartCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = chartCanvas.getBoundingClientRect();
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    cCtx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
+
+    cCtx.fillStyle = "#fff";
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = { top: 10, right: 12, bottom: 22, left: 32 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Y-axis grid & labels (0.0 – 1.0)
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    for (let v = 0; v <= 1.0; v += 0.25) {
+        const y = pad.top + plotH - v * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillText(v.toFixed(2), pad.left - 4, y);
+    }
+
+    // X-axis label
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
+
+    // Axis frame
+    cCtx.strokeStyle = "#ccc";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, pad.top);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.stroke();
+
+    if (driveHistory.length < 2) return;
+
+    const minTick = driveHistory[0].tick;
+    const maxTick = driveHistory[driveHistory.length - 1].tick;
+    const tickRange = maxTick - minTick || 1;
+
+    // X-axis tick labels
+    cCtx.fillStyle = "#aaa";
+    cCtx.textBaseline = "top";
+    cCtx.textAlign = "center";
+    const tickStep = Math.max(1, Math.ceil(tickRange / 5));
+    for (let t = minTick; t <= maxTick; t += tickStep) {
+        const x = pad.left + ((t - minTick) / tickRange) * plotW;
+        cCtx.fillText(t, x, pad.top + plotH + 3);
+    }
+
+    // Draw a line series
+    const series = [
+        { key: "hunger",      color: "#4CAF50", label: "Hunger" },
+        { key: "thirst",      color: "#2196F3", label: "Thirst" },
+        { key: "temperature", color: "#F44336", label: "Temperature" },
+    ];
+
+    for (const s of series) {
+        cCtx.strokeStyle = s.color;
+        cCtx.lineWidth = 1.5;
+        cCtx.beginPath();
+        for (let i = 0; i < driveHistory.length; i++) {
+            const d = driveHistory[i];
+            const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+            const y = pad.top + plotH - Math.min(d[s.key], 1.0) * plotH;
+            if (i === 0) cCtx.moveTo(x, y);
+            else cCtx.lineTo(x, y);
+        }
+        cCtx.stroke();
+    }
+
+    // Legend
+    const legendY = pad.top + 2;
+    let legendX = pad.left + 4;
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "left";
+    cCtx.textBaseline = "top";
+    for (const s of series) {
+        cCtx.fillStyle = s.color;
+        cCtx.fillRect(legendX, legendY, 10, 3);
+        cCtx.fillStyle = "#666";
+        cCtx.fillText(s.label, legendX + 13, legendY - 2);
+        legendX += cCtx.measureText(s.label).width + 22;
+    }
 }
 
 // --- Main render ---
@@ -486,27 +616,28 @@ function render(state) {
 // --- Dashboard updates ---
 
 function updatePerceptionList(agent) {
-    const container = document.getElementById("perception-list");
-    if (!agent.perceptions || agent.perceptions.length === 0) {
-        container.innerHTML = '<p class="empty-state">No perceptions</p>';
-        return;
+    const types = ["food", "water", "light", "heat", "obstacle"];
+    // Build best perception per type (highest intensity, closest distance)
+    const best = {};
+    for (const t of types) best[t] = { intensity: 0, distance: null };
+    if (agent.perceptions) {
+        for (const p of agent.perceptions) {
+            const t = p.stimulus_type;
+            if (!(t in best)) continue;
+            if (p.perceived_intensity > best[t].intensity) {
+                best[t].intensity = p.perceived_intensity;
+            }
+            if (best[t].distance === null || p.distance < best[t].distance) {
+                best[t].distance = p.distance;
+            }
+        }
     }
-
-    const sorted = [...agent.perceptions].sort(
-        (a, b) => b.perceived_intensity - a.perceived_intensity
-    );
-
-    container.innerHTML = sorted.map((p) => {
-        const color = COLORS[p.stimulus_type] || "#999";
-        const pct = (p.perceived_intensity * 100).toFixed(0);
-        const dist = p.distance.toFixed(1);
-        return `<div class="perception-item">
-            <span class="dot" style="background:${color}"></span>
-            <span class="type-label">${p.stimulus_type}</span>
-            <span class="intensity">${pct}%</span>
-            <span class="distance">${dist}</span>
-        </div>`;
-    }).join("");
+    for (const t of types) {
+        const intEl = document.getElementById(`perc-${t}`);
+        const distEl = document.getElementById(`perc-${t}-dist`);
+        if (intEl) intEl.textContent = `${(best[t].intensity * 100).toFixed(0)}%`;
+        if (distEl) distEl.textContent = best[t].distance !== null ? best[t].distance.toFixed(1) : "-";
+    }
 }
 
 function updateMemorySummary(agent) {
@@ -540,6 +671,13 @@ function updateMemorySummary(agent) {
     document.getElementById("mem-density-peak").textContent = densityPeak.toFixed(2);
 }
 
+function urgencyColor(value) {
+    if (value < 0.3) return "#4CAF50";       // green
+    if (value < 0.6) return "#FFC107";       // yellow
+    if (value < 0.8) return "#FF9800";       // orange
+    return "#F44336";                         // red
+}
+
 function updateDashboard(state) {
     if (!state.agents || state.agents.length === 0) return;
     const agent = state.agents[0];
@@ -555,8 +693,14 @@ function updateDashboard(state) {
         }
         const bar = document.getElementById(`bar-${name}`);
         const valEl = document.getElementById(`val-${name}`);
-        if (bar) bar.style.width = `${val * 100}%`;
-        if (valEl) valEl.textContent = val.toFixed(2);
+        if (bar) {
+            bar.style.width = `${val * 100}%`;
+            bar.style.background = urgencyColor(val);
+        }
+        if (valEl) {
+            valEl.textContent = val.toFixed(2);
+            valEl.style.color = urgencyColor(val);
+        }
     }
 
     document.getElementById("agent-pos").textContent =
