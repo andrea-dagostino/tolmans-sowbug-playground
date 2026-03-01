@@ -1,4 +1,5 @@
 import random
+from collections import deque
 
 from tolmans_sowbug_playground.core.agent import Agent
 from tolmans_sowbug_playground.core.environment import Environment
@@ -30,12 +31,14 @@ class Sowbug(Agent):
         kernel_bandwidth: float = 2.0,
         vte_horizon: int = 5,
         vte_threshold: float = 0.8,
+        bite_size: float = 0.3,
+        satiety_decay_rate: float = 0.05,
     ) -> None:
         drive_system = DriveSystem(
             drives=[
-                Drive(DriveType.HUNGER, rate=hunger_rate),
-                Drive(DriveType.THIRST, rate=thirst_rate),
-                Drive(DriveType.TEMPERATURE, rate=temperature_rate),
+                Drive(DriveType.HUNGER, rate=hunger_rate, satiety_decay_rate=satiety_decay_rate),
+                Drive(DriveType.THIRST, rate=thirst_rate, satiety_decay_rate=satiety_decay_rate),
+                Drive(DriveType.TEMPERATURE, rate=temperature_rate, satiety_decay_rate=satiety_decay_rate),
             ]
         )
         super().__init__(
@@ -55,6 +58,7 @@ class Sowbug(Agent):
         self._vte_threshold = vte_threshold
         self._vte_automaticity = 0.7
         self._vte_hesitation_rate = 0.3
+        self.bite_size = bite_size
 
         # VTE state — reset each tick, exported for visualization
         self._vte_candidates: list[dict] = []
@@ -62,9 +66,28 @@ class Sowbug(Agent):
         self._vte_chosen: str = ""
         self._vte_hesitated: bool = False
 
+        # Resource gathering counter — cumulative across the simulation
+        self._resource_consumptions: int = 0
+
+        # Stuck detection — when the bug oscillates in a small area,
+        # it suppresses stimulus attraction and explores freely
+        self._stuck_window: int = 8
+        self._recent_positions: deque[tuple[int, int]] = deque(maxlen=self._stuck_window)
+        self._is_stuck: bool = False
+
     def perceive(self, environment: Environment) -> None:
         self._grid_size = (environment.width, environment.height)
         super().perceive(environment)
+
+        # Precompute which adjacent moves are passable for obstacle-aware decisions
+        self._passable_moves: dict[Direction, tuple[int, int]] = {}
+        for d in MOVE_DIRECTIONS:
+            dx, dy = d.value
+            nx, ny = self.position[0] + dx, self.position[1] + dy
+            if environment.is_within_bounds((nx, ny)) and environment.is_passable(
+                (nx, ny)
+            ):
+                self._passable_moves[d] = (nx, ny)
 
     def _drive_to_stimulus(self, drive_type: DriveType) -> StimulusType:
         return DRIVE_STIMULUS_MAP[drive_type]
@@ -72,10 +95,33 @@ class Sowbug(Agent):
     def _direction_toward(self, target: tuple[int, int]) -> Direction:
         dx = target[0] - self.position[0]
         dy = target[1] - self.position[1]
+
+        # Build preference: primary toward target, then perpendicular directions
         if abs(dx) >= abs(dy):
-            return Direction.EAST if dx > 0 else Direction.WEST
+            primary = Direction.EAST if dx > 0 else Direction.WEST
+            perp_a = Direction.SOUTH if dy > 0 else Direction.NORTH
+            perp_b = Direction.NORTH if dy > 0 else Direction.SOUTH
         else:
-            return Direction.SOUTH if dy > 0 else Direction.NORTH
+            primary = Direction.SOUTH if dy > 0 else Direction.NORTH
+            perp_a = Direction.EAST if dx > 0 else Direction.WEST
+            perp_b = Direction.WEST if dx > 0 else Direction.EAST
+
+        # Use current orientation as momentum to break ties between
+        # perpendicular directions — creates natural wall-following
+        perps = [perp_a, perp_b]
+        if self.orientation in perps:
+            perps.remove(self.orientation)
+            perps.insert(0, self.orientation)
+
+        for d in [primary] + perps:
+            if d in self._passable_moves:
+                return d
+
+        # All toward-target directions blocked — pick any passable direction
+        if self._passable_moves:
+            return random.choice(list(self._passable_moves.keys()))
+
+        return Direction.STAY
 
     def _get_light_perceptions(self) -> list[Perception]:
         return [
@@ -106,7 +152,24 @@ class Sowbug(Agent):
         strongest = max(light_perceptions, key=lambda p: p.perceived_intensity)
         return self._direction_toward(strongest.stimulus.position)
 
+    def _explore_freely(self) -> Direction:
+        """Pure familiarity-based exploration — no stimulus attraction."""
+        candidates = []
+        for direction, (nx, ny) in self._passable_moves.items():
+            familiarity = self.memory_system.visited.get((nx, ny), 0.0)
+            candidates.append((direction, familiarity))
+
+        if not candidates:
+            return Direction.STAY
+
+        min_familiarity = min(f for _, f in candidates)
+        least_familiar = [d for d, f in candidates if f == min_familiarity]
+        return random.choice(least_familiar)
+
     def _explore(self) -> Direction:
+        if self._is_stuck:
+            return self._explore_freely()
+
         urgent = self.drive_system.get_most_urgent()
         if urgent is not None:
             target_type = self._drive_to_stimulus(urgent.drive_type)
@@ -119,21 +182,7 @@ class Sowbug(Agent):
                 strongest = max(relevant, key=lambda p: p.perceived_intensity)
                 return self._direction_toward(strongest.stimulus.position)
 
-        # Prefer directions leading to unvisited or less-familiar cells
-        candidates = []
-        for direction in MOVE_DIRECTIONS:
-            dx, dy = direction.value
-            nx, ny = self.position[0] + dx, self.position[1] + dy
-            if 0 <= nx < self._grid_size[0] and 0 <= ny < self._grid_size[1]:
-                familiarity = self.memory_system.visited.get((nx, ny), 0.0)
-                candidates.append((direction, familiarity))
-
-        if not candidates:
-            return random.choice(MOVE_DIRECTIONS)
-
-        min_familiarity = min(f for _, f in candidates)
-        least_familiar = [d for d, f in candidates if f == min_familiarity]
-        return random.choice(least_familiar)
+        return self._explore_freely()
 
     def _get_avg_memory_strength(self, stimulus_type: StimulusType) -> float:
         strengths = []
@@ -147,8 +196,9 @@ class Sowbug(Agent):
         """Vicarious trial and error: mentally simulate each direction."""
         candidates = []
         for direction in MOVE_DIRECTIONS:
-            dx, dy = direction.value
-            next_pos = (self.position[0] + dx, self.position[1] + dy)
+            if direction not in self._passable_moves:
+                continue
+            next_pos = self._passable_moves[direction]
             value = self.memory_system.estimate_value(
                 next_pos, target_stimulus, horizon=self._vte_horizon
             )
@@ -157,6 +207,11 @@ class Sowbug(Agent):
                 "value": round(value, 4),
                 "position": list(next_pos),
             })
+
+        if not candidates:
+            self._is_deliberating = False
+            self._vte_hesitated = False
+            return Direction.STAY
 
         candidates.sort(key=lambda c: c["value"], reverse=True)
         self._vte_candidates = candidates
@@ -186,12 +241,26 @@ class Sowbug(Agent):
         self._vte_chosen = chosen_name
         return Direction[chosen_name]
 
+    def _update_stuck_detection(self) -> None:
+        self._recent_positions.append(self.position)
+        if len(self._recent_positions) >= self._stuck_window:
+            unique = len(set(self._recent_positions))
+            self._is_stuck = unique <= 3
+        else:
+            self._is_stuck = False
+
     def decide(self) -> Direction:
         # Reset VTE state each tick
         self._vte_candidates = []
         self._is_deliberating = False
         self._vte_chosen = ""
         self._vte_hesitated = False
+
+        self._update_stuck_detection()
+
+        # When stuck, bypass all stimulus-directed navigation
+        if self._is_stuck:
+            return self._explore_freely()
 
         urgent = self.drive_system.get_most_urgent()
         if urgent is None:
@@ -202,7 +271,9 @@ class Sowbug(Agent):
                     light_perceptions, key=lambda p: p.perceived_intensity
                 )
                 return self._direction_toward(strongest.stimulus.position)
-            return random.choice(MOVE_DIRECTIONS)
+            if self._passable_moves:
+                return random.choice(list(self._passable_moves.keys()))
+            return Direction.STAY
 
         target_stimulus = self._drive_to_stimulus(urgent.drive_type)
         avg_strength = self._get_avg_memory_strength(target_stimulus)
@@ -232,9 +303,12 @@ class Sowbug(Agent):
             dx = next_pos[0] - self.position[0]
             dy = next_pos[1] - self.position[1]
             if abs(dx) >= abs(dy):
-                return Direction.EAST if dx > 0 else Direction.WEST
+                d = Direction.EAST if dx > 0 else Direction.WEST
             else:
-                return Direction.SOUTH if dy > 0 else Direction.NORTH
+                d = Direction.SOUTH if dy > 0 else Direction.NORTH
+            # Path cell should be passable, but verify
+            if d in self._passable_moves:
+                return d
         return self._direction_toward(target)
 
     def get_state(self) -> dict:
@@ -245,6 +319,8 @@ class Sowbug(Agent):
             "chosen": self._vte_chosen,
             "hesitated": self._vte_hesitated,
         }
+        state["resource_consumptions"] = self._resource_consumptions
+        state["is_stuck"] = self._is_stuck
         return state
 
     def post_act(self, environment: Environment) -> None:
@@ -252,35 +328,14 @@ class Sowbug(Agent):
         self.drive_system.update()
 
         stimuli_here = environment.get_stimuli_at(self.position)
-        for stimulus in stimuli_here:
-            reward = 0.0
-            if (
-                stimulus.stimulus_type == StimulusType.FOOD
-                and self.drive_system.get_level(DriveType.HUNGER) > 0.1
-            ):
-                self.drive_system.satisfy(DriveType.HUNGER, 0.3)
-                reward = 1.0
-                stimulus._consumed = True
-            elif (
-                stimulus.stimulus_type == StimulusType.WATER
-                and self.drive_system.get_level(DriveType.THIRST) > 0.1
-            ):
-                self.drive_system.satisfy(DriveType.THIRST, 0.3)
-                reward = 1.0
-                stimulus._consumed = True
-            elif (
-                stimulus.stimulus_type == StimulusType.HEAT
-                and self.drive_system.get_level(DriveType.TEMPERATURE) > 0.1
-            ):
-                self.drive_system.satisfy(DriveType.TEMPERATURE, 0.3)
-                reward = 1.0
 
-            self.memory_system.record_experience(
-                self.position,
-                stimulus.stimulus_type,
-                stimulus.intensity,
-                reward,
-            )
+        # Evaluate predictions BEFORE recording new experiences, so we
+        # compare against what the bug expected from prior visits.
+        CONSUMABLE = {
+            StimulusType.FOOD: DriveType.HUNGER,
+            StimulusType.WATER: DriveType.THIRST,
+            StimulusType.HEAT: DriveType.TEMPERATURE,
+        }
 
         for pos, entries in list(self.memory_system.cognitive_map.items()):
             if pos == self.position:
@@ -291,16 +346,44 @@ class Sowbug(Agent):
                         if s.stimulus_type == entry.stimulus_type
                     ]
                     if actual_stim:
+                        # Compute actual reward from current drive state
+                        drive_type = CONSUMABLE.get(entry.stimulus_type)
+                        if drive_type is not None and self.drive_system.get_level(drive_type) > 0.1:
+                            actual_reward = 1.0
+                        else:
+                            actual_reward = 0.0
                         self.memory_system.update_expectation(
                             pos,
                             entry.stimulus_type,
                             actual_stim[0].intensity,
-                            entry.reward_value,
+                            actual_reward,
                         )
                     else:
                         self.memory_system.update_expectation(
                             pos, entry.stimulus_type, 0.0, 0.0
                         )
+
+        for stimulus in stimuli_here:
+            drive_type = CONSUMABLE.get(stimulus.stimulus_type)
+            if drive_type is None:
+                self.memory_system.record_experience(
+                    self.position, stimulus.stimulus_type, stimulus.intensity, 0.0
+                )
+                continue
+            drive_level = self.drive_system.get_level(drive_type)
+            if drive_level <= 0.1:
+                self.memory_system.record_experience(
+                    self.position, stimulus.stimulus_type, stimulus.intensity, 0.0
+                )
+                continue
+            wanted = self.bite_size * drive_level
+            actual = stimulus.consume(wanted)
+            self.drive_system.satisfy(drive_type, actual)
+            if actual > 0:
+                self._resource_consumptions += 1
+            self.memory_system.record_experience(
+                self.position, stimulus.stimulus_type, stimulus.intensity, 1.0
+            )
 
         self.memory_system.decay()
         self.memory_system.record_visit(self.position)

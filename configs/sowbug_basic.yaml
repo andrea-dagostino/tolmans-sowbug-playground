@@ -11,20 +11,19 @@ stimuli:
     position: [15, 10]
     intensity: 1.0
     radius: 6.0
-    depletes: true
-    depletion_rate: 0.05
+    quantity: 5.0
 
   - type: food
     position: [3, 15]
     intensity: 0.8
     radius: 5.0
-    depletes: true
-    depletion_rate: 0.05
+    quantity: 5.0
 
   - type: water
     position: [10, 3]
     intensity: 0.9
     radius: 4.0
+    quantity: 5.0
 
   - type: light
     position: [10, 10]
@@ -63,3 +62,4 @@ agent:
   kernel_bandwidth: 2.0
   vte_horizon: 5
   vte_threshold: 0.8
+  satiety_decay_rate: 0.05
