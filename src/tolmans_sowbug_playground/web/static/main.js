@@ -36,6 +36,8 @@ let accuracyChartHoverX = null;
 let eventLog = [];
 let _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
 let _firstDeliberation = false;
+let hoveredStimulus = null;
+let hoverPixel = { x: 0, y: 0 };
 
 function updateCanvasSize(w, h) {
     gridWidth = w;
@@ -852,8 +854,55 @@ function render(state) {
     }
 
     renderLegend();
+    renderTooltip();
 
     document.getElementById("tick-counter").textContent = `Tick: ${state.tick}`;
+}
+
+function renderTooltip() {
+    if (!hoveredStimulus) return;
+    const s = hoveredStimulus;
+
+    const lines = [
+        `Type: ${s.type.charAt(0).toUpperCase() + s.type.slice(1)}`,
+        `Intensity: ${(s.intensity * 100).toFixed(0)}%`,
+        `Quantity: ${s.quantity != null ? s.quantity.toFixed(1) : "Infinite"}`,
+        `Radius: ${s.radius != null ? s.radius.toFixed(1) : "-"}`,
+    ];
+
+    ctx.font = "11px monospace";
+    const lineH = 16;
+    const padX = 8;
+    const padY = 6;
+    const textW = Math.max(...lines.map(l => ctx.measureText(l).width));
+    const tooltipW = textW + padX * 2;
+    const tooltipH = lines.length * lineH + padY * 2;
+    const offset = 12;
+
+    // Position: prefer right/below cursor, flip if near edges
+    let tx = hoverPixel.x + offset;
+    let ty = hoverPixel.y + offset;
+    if (tx + tooltipW > canvas.width) tx = hoverPixel.x - tooltipW - offset;
+    if (ty + tooltipH > canvas.height) ty = hoverPixel.y - tooltipH - offset;
+    tx = Math.max(0, tx);
+    ty = Math.max(0, ty);
+
+    // Background
+    ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+    ctx.strokeStyle = "#bbb";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(tx, ty, tooltipW, tooltipH, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // Text
+    ctx.fillStyle = "#333";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], tx + padX, ty + padY + i * lineH);
+    }
 }
 
 // --- Dashboard updates ---
@@ -1080,13 +1129,18 @@ function placeStimulus(x, y) {
     const key = `${x},${y}`;
     if (_lastPaintCell === key) return;  // skip duplicate
     _lastPaintCell = key;
-    send({
+    const stimType = document.getElementById("stim-type").value;
+    const msg = {
         action: "add_stimulus",
-        stimulus_type: document.getElementById("stim-type").value,
+        stimulus_type: stimType,
         position: [x, y],
         intensity: 1.0,
         radius: 5.0,
-    });
+    };
+    if (stimType === "food" || stimType === "water") {
+        msg.quantity = 5.0;
+    }
+    send(msg);
 }
 
 canvas.addEventListener("mousedown", (e) => {
@@ -1099,13 +1153,37 @@ canvas.addEventListener("mousedown", (e) => {
 });
 
 canvas.addEventListener("mousemove", (e) => {
-    if (!_painting) return;
-    const [x, y] = canvasToGrid(e);
-    placeStimulus(x, y);
+    const [gx, gy] = canvasToGrid(e);
+    if (_painting) {
+        placeStimulus(gx, gy);
+    }
+    // Hover detection for stimulus tooltip
+    const rect = canvas.getBoundingClientRect();
+    hoverPixel.x = e.clientX - rect.left;
+    hoverPixel.y = e.clientY - rect.top;
+    let found = null;
+    if (latestState && latestState.stimuli) {
+        for (const stim of latestState.stimuli) {
+            if (stim.position[0] === gx && stim.position[1] === gy) {
+                found = stim;
+                break;
+            }
+        }
+    }
+    if (found !== hoveredStimulus) {
+        hoveredStimulus = found;
+        if (latestState) render(latestState);
+    }
 });
 
 canvas.addEventListener("mouseup", () => { _painting = false; });
-canvas.addEventListener("mouseleave", () => { _painting = false; });
+canvas.addEventListener("mouseleave", () => {
+    _painting = false;
+    if (hoveredStimulus) {
+        hoveredStimulus = null;
+        if (latestState) render(latestState);
+    }
+});
 
 // Right-click to remove stimulus
 canvas.addEventListener("contextmenu", (e) => {
