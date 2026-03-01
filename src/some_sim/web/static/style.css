@@ -46,6 +46,16 @@ main {
 
 #grid-canvas { display: block; cursor: crosshair; }
 
+#chart-canvas {
+    width: 100%;
+    height: 100px;
+    background: white;
+    border: 1px solid #ccc;
+    border-top: none;
+    border-radius: 0;
+    display: block;
+}
+
 /* Toolbar sits flush under canvas, same width */
 #env-toolbar {
     background: white;
@@ -85,7 +95,8 @@ main {
     font-family: monospace;
 }
 
-#btn-regenerate {
+#btn-regenerate,
+#btn-save-preset {
     padding: 0.2rem 0.5rem;
     border: 1px solid #ccc;
     border-radius: 3px;
@@ -93,7 +104,8 @@ main {
     cursor: pointer;
     font-size: 0.75rem;
 }
-#btn-regenerate:hover { background: #f0f0f0; }
+#btn-regenerate:hover,
+#btn-save-preset:hover { background: #f0f0f0; }
 
 .toolbar-sep {
     width: 1px;

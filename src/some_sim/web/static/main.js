@@ -23,6 +23,8 @@ const COLORS = {
 
 let ws = null;
 let latestState = null;
+let coverageHistory = [];
+let lastRecordedTick = -1;
 let showCognitiveMap = true;
 let showPerception = true;
 let showDensityField = true;
@@ -41,7 +43,20 @@ function connectWebSocket() {
     ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
     ws.onmessage = (event) => {
-        latestState = JSON.parse(event.data);
+        const msg = JSON.parse(event.data);
+
+        // Handle preset_saved response
+        if (msg.preset_saved) {
+            const sel = document.getElementById("preset-select");
+            // Rebuild options: Custom + all presets from server
+            const presets = msg.presets || [];
+            sel.innerHTML = '<option value="">Custom</option>' +
+                presets.map(p => `<option value="${p}">${p}</option>`).join("");
+            sel.value = msg.preset_saved;
+            return;
+        }
+
+        latestState = msg;
         if (latestState.grid_width && latestState.grid_height) {
             if (latestState.grid_width !== gridWidth || latestState.grid_height !== gridHeight) {
                 updateCanvasSize(latestState.grid_width, latestState.grid_height);
@@ -49,6 +64,21 @@ function connectWebSocket() {
                 document.getElementById("grid-height").value = gridHeight;
             }
         }
+
+        // Track coverage history
+        const tick = latestState.tick || 0;
+        if (tick <= lastRecordedTick) {
+            coverageHistory = [];
+        }
+        lastRecordedTick = tick;
+        if (latestState.agents && latestState.agents.length > 0) {
+            const agent = latestState.agents[0];
+            const visited = agent.visited_cells ? Object.keys(agent.visited_cells).length : 0;
+            const total = gridWidth * gridHeight;
+            coverageHistory.push({ tick, coverage: visited / total });
+        }
+        renderChart();
+
         render(latestState);
         updateDashboard(latestState);
     };
@@ -287,6 +317,105 @@ function renderVTE(state) {
     }
 }
 
+// --- Coverage chart ---
+
+function renderChart() {
+    const chartCanvas = document.getElementById("chart-canvas");
+    const cCtx = chartCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = chartCanvas.getBoundingClientRect();
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    cCtx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
+
+    cCtx.fillStyle = "#fff";
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = { top: 8, right: 12, bottom: 20, left: 36 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Grid lines & Y-axis labels
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    for (let pct = 0; pct <= 100; pct += 25) {
+        const y = pad.top + plotH - (pct / 100) * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillText(`${pct}%`, pad.left - 4, y);
+    }
+
+    // X-axis label
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
+
+    if (coverageHistory.length < 2) {
+        // Axis frame only
+        cCtx.strokeStyle = "#ccc";
+        cCtx.lineWidth = 1;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, pad.top);
+        cCtx.lineTo(pad.left, pad.top + plotH);
+        cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+        cCtx.stroke();
+        return;
+    }
+
+    const minTick = coverageHistory[0].tick;
+    const maxTick = coverageHistory[coverageHistory.length - 1].tick;
+    const tickRange = maxTick - minTick || 1;
+
+    // X-axis tick labels
+    cCtx.fillStyle = "#aaa";
+    cCtx.textBaseline = "top";
+    cCtx.textAlign = "center";
+    const tickStep = Math.max(1, Math.ceil(tickRange / 5));
+    for (let t = minTick; t <= maxTick; t += tickStep) {
+        const x = pad.left + ((t - minTick) / tickRange) * plotW;
+        cCtx.fillText(t, x, pad.top + plotH + 3);
+    }
+
+    // Axis frame
+    cCtx.strokeStyle = "#ccc";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, pad.top);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.stroke();
+
+    // Coverage line
+    cCtx.strokeStyle = "#7C4DFF";
+    cCtx.lineWidth = 1.5;
+    cCtx.beginPath();
+    for (let i = 0; i < coverageHistory.length; i++) {
+        const d = coverageHistory[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - d.coverage * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    // Fill under the line
+    const last = coverageHistory[coverageHistory.length - 1];
+    const lastX = pad.left + ((last.tick - minTick) / tickRange) * plotW;
+    cCtx.lineTo(lastX, pad.top + plotH);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.closePath();
+    cCtx.fillStyle = "rgba(124, 77, 255, 0.08)";
+    cCtx.fill();
+}
+
 // --- Main render ---
 
 function render(state) {
@@ -502,6 +631,14 @@ document.getElementById("btn-regenerate").onclick = () => {
 document.getElementById("grid-width").oninput = () => { presetSelect.value = ""; };
 document.getElementById("grid-height").oninput = () => { presetSelect.value = ""; };
 
+// Save current environment as a preset
+document.getElementById("btn-save-preset").onclick = () => {
+    const name = prompt("Preset name:");
+    if (name && name.trim()) {
+        send({ action: "save_preset", name: name.trim() });
+    }
+};
+
 // Overlay toggles
 document.getElementById("toggle-cogmap").onchange = (e) => {
     showCognitiveMap = e.target.checked;
@@ -520,29 +657,57 @@ document.getElementById("toggle-vte").onchange = (e) => {
     if (latestState) render(latestState);
 };
 
-// Left-click to place stimulus
-canvas.onclick = (e) => {
+// --- Canvas drag-to-paint & right-click remove ---
+let _painting = false;
+let _lastPaintCell = null;
+
+function canvasToGrid(e) {
     const rect = canvas.getBoundingClientRect();
     const x = Math.floor((e.clientX - rect.left) / (rect.width / gridWidth));
     const y = Math.floor((e.clientY - rect.top) / (rect.height / gridHeight));
-    const stimType = document.getElementById("stim-type").value;
+    return [
+        Math.max(0, Math.min(gridWidth - 1, x)),
+        Math.max(0, Math.min(gridHeight - 1, y)),
+    ];
+}
+
+function placeStimulus(x, y) {
+    const key = `${x},${y}`;
+    if (_lastPaintCell === key) return;  // skip duplicate
+    _lastPaintCell = key;
     send({
         action: "add_stimulus",
-        stimulus_type: stimType,
+        stimulus_type: document.getElementById("stim-type").value,
         position: [x, y],
         intensity: 1.0,
         radius: 5.0,
     });
-};
+}
+
+canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 0) {  // left button
+        _painting = true;
+        _lastPaintCell = null;
+        const [x, y] = canvasToGrid(e);
+        placeStimulus(x, y);
+    }
+});
+
+canvas.addEventListener("mousemove", (e) => {
+    if (!_painting) return;
+    const [x, y] = canvasToGrid(e);
+    placeStimulus(x, y);
+});
+
+canvas.addEventListener("mouseup", () => { _painting = false; });
+canvas.addEventListener("mouseleave", () => { _painting = false; });
 
 // Right-click to remove stimulus
-canvas.oncontextmenu = (e) => {
+canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / (rect.width / gridWidth));
-    const y = Math.floor((e.clientY - rect.top) / (rect.height / gridHeight));
+    const [x, y] = canvasToGrid(e);
     send({ action: "remove_stimulus", position: [x, y] });
-};
+});
 
 // Start
 connectWebSocket();
