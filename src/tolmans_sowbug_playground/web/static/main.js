@@ -23,16 +23,17 @@ const COLORS = {
 
 let ws = null;
 let latestState = null;
-let accuracyHistory = [];
+let resourceHistory = [];
 let lastRecordedTick = -1;
 let driveHistory = [];
+let positionHistory = [];
 let showCognitiveMap = true;
 let showPerception = true;
 let showDensityField = true;
 let showVTE = true;
 let showLegend = true;
 let driveChartHoverX = null;
-let accuracyChartHoverX = null;
+let resourceChartHoverX = null;
 let eventLog = [];
 let _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
 let _firstDeliberation = false;
@@ -74,11 +75,12 @@ function connectWebSocket() {
             }
         }
 
-        // Track accuracy history
+        // Track resource gathering history
         const tick = latestState.tick || 0;
         if (tick <= lastRecordedTick) {
-            accuracyHistory = [];
+            resourceHistory = [];
             driveHistory = [];
+            positionHistory = [];
             eventLog = [];
             _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
             _firstDeliberation = false;
@@ -86,8 +88,8 @@ function connectWebSocket() {
         lastRecordedTick = tick;
         if (latestState.agents && latestState.agents.length > 0) {
             const agent = latestState.agents[0];
-            const accuracy = agent.prediction_accuracy != null ? agent.prediction_accuracy : 0;
-            accuracyHistory.push({ tick, accuracy });
+            const consumptions = agent.resource_consumptions != null ? agent.resource_consumptions : 0;
+            resourceHistory.push({ tick, consumptions });
 
             // Track drive levels
             const drives = agent.drive_levels || {};
@@ -99,6 +101,10 @@ function connectWebSocket() {
                 else if (kl.includes("temperature")) entry.temperature = v;
             }
             driveHistory.push(entry);
+
+            // Track position for trajectory chart
+            const [px, py] = agent.position;
+            positionHistory.push({ tick, x: px, y: py });
 
             // Detect events for chart annotations
             if (driveHistory.length > 1) {
@@ -126,6 +132,7 @@ function connectWebSocket() {
         }
         renderChart();
         renderDriveChart();
+        renderTrajectoryChart();
 
         render(latestState);
         updateDashboard(latestState);
@@ -365,7 +372,7 @@ function renderVTE(state) {
     }
 }
 
-// --- Prediction accuracy chart ---
+// --- Resource gathering chart ---
 
 function renderChart() {
     const chartCanvas = document.getElementById("coverage-chart-canvas");
@@ -382,45 +389,29 @@ function renderChart() {
     cCtx.fillStyle = "#fff";
     cCtx.fillRect(0, 0, W, H);
 
-    const pad = { top: 8, right: 12, bottom: 20, left: 36 };
+    const pad = { top: 8, right: 40, bottom: 20, left: 36 };
     const plotW = W - pad.left - pad.right;
     const plotH = H - pad.top - pad.bottom;
 
-    // Grid lines & Y-axis labels
-    cCtx.strokeStyle = "#eee";
-    cCtx.lineWidth = 1;
-    cCtx.fillStyle = "#aaa";
-    cCtx.font = "9px monospace";
-    cCtx.textAlign = "right";
-    cCtx.textBaseline = "middle";
-    for (let pct = 0; pct <= 100; pct += 25) {
-        const y = pad.top + plotH - (pct / 100) * plotH;
-        cCtx.beginPath();
-        cCtx.moveTo(pad.left, y);
-        cCtx.lineTo(pad.left + plotW, y);
-        cCtx.stroke();
-        cCtx.fillText(`${pct}%`, pad.left - 4, y);
-    }
+    if (resourceHistory.length < 2) {
+        // Y-axis label
+        cCtx.save();
+        cCtx.fillStyle = "#888";
+        cCtx.font = "9px sans-serif";
+        cCtx.textAlign = "center";
+        cCtx.textBaseline = "top";
+        cCtx.translate(8, pad.top + plotH / 2);
+        cCtx.rotate(-Math.PI / 2);
+        cCtx.fillText("Consumptions", 0, 0);
+        cCtx.restore();
 
-    // Rotated Y-axis label
-    cCtx.save();
-    cCtx.fillStyle = "#888";
-    cCtx.font = "9px sans-serif";
-    cCtx.textAlign = "center";
-    cCtx.textBaseline = "top";
-    cCtx.translate(8, pad.top + plotH / 2);
-    cCtx.rotate(-Math.PI / 2);
-    cCtx.fillText("Pred. Accuracy", 0, 0);
-    cCtx.restore();
+        // X-axis label
+        cCtx.textAlign = "center";
+        cCtx.textBaseline = "top";
+        cCtx.fillStyle = "#aaa";
+        cCtx.font = "9px monospace";
+        cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
 
-    // X-axis label
-    cCtx.textAlign = "center";
-    cCtx.textBaseline = "top";
-    cCtx.fillStyle = "#aaa";
-    cCtx.font = "9px monospace";
-    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
-
-    if (accuracyHistory.length < 2) {
         // Axis frame only
         cCtx.strokeStyle = "#ccc";
         cCtx.lineWidth = 1;
@@ -432,9 +423,86 @@ function renderChart() {
         return;
     }
 
-    const minTick = accuracyHistory[0].tick;
-    const maxTick = accuracyHistory[accuracyHistory.length - 1].tick;
+    const minTick = resourceHistory[0].tick;
+    const maxTick = resourceHistory[resourceHistory.length - 1].tick;
     const tickRange = maxTick - minTick || 1;
+
+    // Compute max cumulative value for Y scale
+    const maxCumulative = resourceHistory[resourceHistory.length - 1].consumptions;
+    const yMax = Math.max(1, maxCumulative);
+
+    // Compute rolling rate (consumptions per window of 20 ticks)
+    const WINDOW = 20;
+    const rollingRate = [];
+    for (let i = 0; i < resourceHistory.length; i++) {
+        const current = resourceHistory[i].consumptions;
+        // Find the entry ~WINDOW ticks ago
+        let pastIdx = i;
+        while (pastIdx > 0 && resourceHistory[i].tick - resourceHistory[pastIdx].tick < WINDOW) {
+            pastIdx--;
+        }
+        const past = resourceHistory[pastIdx].consumptions;
+        const dt = resourceHistory[i].tick - resourceHistory[pastIdx].tick;
+        rollingRate.push(dt > 0 ? (current - past) / dt * WINDOW : 0);
+    }
+    const maxRate = Math.max(1, ...rollingRate);
+
+    // Grid lines & Y-axis labels (left axis — cumulative)
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+        const frac = i / ySteps;
+        const y = pad.top + plotH - frac * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillStyle = "#00897B";
+        cCtx.fillText(Math.round(frac * yMax), pad.left - 4, y);
+    }
+
+    // Right Y-axis labels (rolling rate)
+    cCtx.textAlign = "left";
+    for (let i = 0; i <= ySteps; i++) {
+        const frac = i / ySteps;
+        const y = pad.top + plotH - frac * plotH;
+        cCtx.fillStyle = "#FF9800";
+        cCtx.fillText((frac * maxRate).toFixed(1), pad.left + plotW + 4, y);
+    }
+
+    // Rotated Y-axis label (left)
+    cCtx.save();
+    cCtx.fillStyle = "#00897B";
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.translate(8, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText("Consumptions", 0, 0);
+    cCtx.restore();
+
+    // Rotated Y-axis label (right)
+    cCtx.save();
+    cCtx.fillStyle = "#FF9800";
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "bottom";
+    cCtx.translate(W - 4, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText("Rate / 20t", 0, 0);
+    cCtx.restore();
+
+    // X-axis label
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
 
     // X-axis tick labels
     cCtx.fillStyle = "#aaa";
@@ -453,23 +521,37 @@ function renderChart() {
     cCtx.moveTo(pad.left, pad.top);
     cCtx.lineTo(pad.left, pad.top + plotH);
     cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top);
     cCtx.stroke();
 
-    // Accuracy line
-    cCtx.strokeStyle = "#00897B";
-    cCtx.lineWidth = 2;
+    // Rolling rate line (faded, behind)
+    cCtx.strokeStyle = "rgba(255, 152, 0, 0.5)";
+    cCtx.lineWidth = 1.5;
     cCtx.beginPath();
-    for (let i = 0; i < accuracyHistory.length; i++) {
-        const d = accuracyHistory[i];
+    for (let i = 0; i < resourceHistory.length; i++) {
+        const d = resourceHistory[i];
         const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
-        const y = pad.top + plotH - d.accuracy * plotH;
+        const y = pad.top + plotH - (rollingRate[i] / maxRate) * plotH;
         if (i === 0) cCtx.moveTo(x, y);
         else cCtx.lineTo(x, y);
     }
     cCtx.stroke();
 
-    // Fill under the line
-    const last = accuracyHistory[accuracyHistory.length - 1];
+    // Cumulative line (solid, on top)
+    cCtx.strokeStyle = "#00897B";
+    cCtx.lineWidth = 2;
+    cCtx.beginPath();
+    for (let i = 0; i < resourceHistory.length; i++) {
+        const d = resourceHistory[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - (d.consumptions / yMax) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    // Fill under cumulative line
+    const last = resourceHistory[resourceHistory.length - 1];
     const lastX = pad.left + ((last.tick - minTick) / tickRange) * plotW;
     cCtx.lineTo(lastX, pad.top + plotH);
     cCtx.lineTo(pad.left, pad.top + plotH);
@@ -492,8 +574,8 @@ function renderChart() {
     }
 
     // Hover crosshair and tooltip
-    if (accuracyChartHoverX !== null) {
-        const hx = accuracyChartHoverX;
+    if (resourceChartHoverX !== null) {
+        const hx = resourceChartHoverX;
         if (hx >= pad.left && hx <= pad.left + plotW) {
             cCtx.strokeStyle = "rgba(0,0,0,0.3)";
             cCtx.lineWidth = 1;
@@ -505,15 +587,16 @@ function renderChart() {
             cCtx.setLineDash([]);
 
             const hoverTick = minTick + ((hx - pad.left) / plotW) * tickRange;
-            let closest = accuracyHistory[0];
+            let closest = resourceHistory[0];
+            let closestIdx = 0;
             let minDist = Infinity;
-            for (const d of accuracyHistory) {
-                const dist = Math.abs(d.tick - hoverTick);
-                if (dist < minDist) { minDist = dist; closest = d; }
+            for (let i = 0; i < resourceHistory.length; i++) {
+                const dist = Math.abs(resourceHistory[i].tick - hoverTick);
+                if (dist < minDist) { minDist = dist; closest = resourceHistory[i]; closestIdx = i; }
             }
 
-            const tooltipW = 100;
-            const tooltipH = 28;
+            const tooltipW = 120;
+            const tooltipH = 40;
             let tx = hx + 8;
             if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
             let ty = pad.top + 4;
@@ -532,7 +615,9 @@ function renderChart() {
             cCtx.fillStyle = "#333";
             cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
             cCtx.fillStyle = "#00897B";
-            cCtx.fillText(`Acc: ${(closest.accuracy * 100).toFixed(1)}%`, tx + 4, ty + 16);
+            cCtx.fillText(`Total: ${closest.consumptions}`, tx + 4, ty + 16);
+            cCtx.fillStyle = "#FF9800";
+            cCtx.fillText(`Rate: ${rollingRate[closestIdx].toFixed(1)}/20t`, tx + 4, ty + 28);
         }
     }
 }
@@ -717,6 +802,178 @@ function renderDriveChart() {
             cCtx.fillText(`Tp: ${closest.temperature.toFixed(2)}`, tx + 4, ty + 38);
         }
     }
+}
+
+function renderTrajectoryChart() {
+    const cv = document.getElementById("trajectory-canvas");
+    if (!cv) return;
+    const c = cv.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = cv.clientWidth;
+    const cssH = cv.clientHeight;
+    cv.width = cssW * dpr;
+    cv.height = cssH * dpr;
+    c.scale(dpr, dpr);
+
+    const pad = { top: 16, right: 16, bottom: 24, left: 30 };
+    const plotW = cssW - pad.left - pad.right;
+    const plotH = cssH - pad.top - pad.bottom;
+
+    // Background
+    c.fillStyle = "#fff";
+    c.fillRect(0, 0, cssW, cssH);
+
+    if (positionHistory.length < 1) {
+        c.fillStyle = "#bbb";
+        c.font = "11px sans-serif";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.fillText("No trajectory data", cssW / 2, cssH / 2);
+        return;
+    }
+
+    // Use the full grid as the spatial extent (not just visited cells)
+    const extMinX = -0.5;
+    const extMaxX = gridWidth - 0.5;
+    const extMinY = -0.5;
+    const extMaxY = gridHeight - 0.5;
+    const extW = extMaxX - extMinX;
+    const extH = extMaxY - extMinY;
+
+    // Square aspect ratio
+    const scaleXY = Math.min(plotW / extW, plotH / extH);
+    const drawW = extW * scaleXY;
+    const drawH = extH * scaleXY;
+    const ox = pad.left + (plotW - drawW) / 2;
+    const oy = pad.top + (plotH - drawH) / 2;
+
+    // KDE on a pixel-resolution grid (sample every ~3px for speed)
+    const SAMPLE = 3;
+    const cols = Math.max(4, Math.floor(drawW / SAMPLE));
+    const rows = Math.max(4, Math.floor(drawH / SAMPLE));
+    const cellW = drawW / cols;
+    const cellH = drawH / rows;
+
+    // Bandwidth in grid-cell units — adaptive to grid size
+    const bw = Math.max(1.0, Math.min(gridWidth, gridHeight) * 0.08);
+    const bwPx = bw * scaleXY;
+    const bw2 = 2 * bwPx * bwPx;
+    // Precompute cutoff radius in sample cells
+    const cutoffPx = bwPx * 3;
+    const cutoffCells = Math.ceil(cutoffPx / Math.min(cellW, cellH));
+
+    // Build density grid
+    const density = new Float32Array(cols * rows);
+
+    // Convert positions to screen coords once
+    const pts = new Float32Array(positionHistory.length * 2);
+    for (let i = 0; i < positionHistory.length; i++) {
+        const p = positionHistory[i];
+        pts[i * 2]     = ox + (p.x - extMinX) / extW * drawW;
+        pts[i * 2 + 1] = oy + (p.y - extMinY) / extH * drawH;
+    }
+
+    // Accumulate Gaussian kernel contributions
+    for (let pi = 0; pi < positionHistory.length; pi++) {
+        const px = pts[pi * 2];
+        const py = pts[pi * 2 + 1];
+        // Determine affected sample cells
+        const ci = Math.round((px - ox) / cellW);
+        const ri = Math.round((py - oy) / cellH);
+        const r0 = Math.max(0, ri - cutoffCells);
+        const r1 = Math.min(rows - 1, ri + cutoffCells);
+        const c0 = Math.max(0, ci - cutoffCells);
+        const c1 = Math.min(cols - 1, ci + cutoffCells);
+        for (let r = r0; r <= r1; r++) {
+            const sy = oy + (r + 0.5) * cellH;
+            const dy = sy - py;
+            const dy2 = dy * dy;
+            for (let col = c0; col <= c1; col++) {
+                const sx = ox + (col + 0.5) * cellW;
+                const dx = sx - px;
+                const dist2 = dx * dx + dy2;
+                if (dist2 < cutoffPx * cutoffPx) {
+                    density[r * cols + col] += Math.exp(-dist2 / bw2);
+                }
+            }
+        }
+    }
+
+    // Find peak for normalization
+    let peak = 0;
+    for (let i = 0; i < density.length; i++) {
+        if (density[i] > peak) peak = density[i];
+    }
+
+    // Draw KDE heatmap (warm orange palette, transparent where empty)
+    if (peak > 0) {
+        for (let r = 0; r < rows; r++) {
+            for (let col = 0; col < cols; col++) {
+                const v = density[r * cols + col] / peak;
+                if (v < 0.01) continue;
+                // Cool-to-warm: transparent → blue-ish → orange → bright yellow
+                let cr, cg, cb;
+                if (v < 0.33) {
+                    const t = v / 0.33;
+                    cr = Math.round(30 + 50 * t);
+                    cg = Math.round(60 + 80 * t);
+                    cb = Math.round(120 + 80 * t);
+                } else if (v < 0.66) {
+                    const t = (v - 0.33) / 0.33;
+                    cr = Math.round(80 + 175 * t);
+                    cg = Math.round(140 + 12 * t);
+                    cb = Math.round(200 - 200 * t);
+                } else {
+                    const t = (v - 0.66) / 0.34;
+                    cr = 255;
+                    cg = Math.round(152 + 103 * t);
+                    cb = Math.round(0 + 50 * t);
+                }
+                c.globalAlpha = Math.min(1, 0.15 + 0.75 * v);
+                c.fillStyle = `rgb(${cr},${cg},${cb})`;
+                c.fillRect(ox + col * cellW, oy + r * cellH, cellW + 0.5, cellH + 0.5);
+            }
+        }
+        c.globalAlpha = 1.0;
+    }
+
+    // Cardinal labels
+    c.font = "bold 9px sans-serif";
+    c.fillStyle = "#999";
+    c.textAlign = "center";
+    c.textBaseline = "bottom";
+    c.fillText("N", ox + drawW / 2, oy - 3);
+    c.textBaseline = "top";
+    c.fillText("S", ox + drawW / 2, oy + drawH + 3);
+    c.textAlign = "right";
+    c.textBaseline = "middle";
+    c.fillText("W", ox - 5, oy + drawH / 2);
+    c.textAlign = "left";
+    c.fillText("E", ox + drawW + 5, oy + drawH / 2);
+
+    // Border
+    c.strokeStyle = "#ddd";
+    c.lineWidth = 0.5;
+    c.strokeRect(ox, oy, drawW, drawH);
+
+    // Start marker (green ring)
+    const p0 = positionHistory[0];
+    const s0x = ox + (p0.x - extMinX) / extW * drawW;
+    const s0y = oy + (p0.y - extMinY) / extH * drawH;
+    c.strokeStyle = "#4CAF50";
+    c.lineWidth = 1.5;
+    c.beginPath();
+    c.arc(s0x, s0y, 4, 0, Math.PI * 2);
+    c.stroke();
+
+    // Current position marker (orange dot)
+    const pN = positionHistory[positionHistory.length - 1];
+    const sNx = ox + (pN.x - extMinX) / extW * drawW;
+    const sNy = oy + (pN.y - extMinY) / extH * drawH;
+    c.fillStyle = COLORS.agent;
+    c.beginPath();
+    c.arc(sNx, sNy, 3.5, 0, Math.PI * 2);
+    c.fill();
 }
 
 function renderLegend() {
@@ -1000,6 +1257,21 @@ function updateDashboard(state) {
         }
     }
 
+    const satiety = agent.satiety_levels || {};
+    for (const [name] of [["hunger"], ["thirst"], ["temperature"]]) {
+        let sat = 0;
+        for (const [k, v] of Object.entries(satiety)) {
+            if (k.toLowerCase().includes(name)) {
+                sat = v;
+                break;
+            }
+        }
+        const satBar = document.getElementById(`satiety-${name}`);
+        if (satBar) {
+            satBar.style.width = `${sat * 100}%`;
+        }
+    }
+
     document.getElementById("agent-pos").textContent =
         `(${agent.position[0]}, ${agent.position[1]})`;
     document.getElementById("agent-orient").textContent = agent.orientation;
@@ -1208,11 +1480,11 @@ driveChartCanvas.addEventListener("mouseleave", () => {
 
 coverageChartCanvas.addEventListener("mousemove", (e) => {
     const rect = coverageChartCanvas.getBoundingClientRect();
-    accuracyChartHoverX = e.clientX - rect.left;
+    resourceChartHoverX = e.clientX - rect.left;
     renderChart();
 });
 coverageChartCanvas.addEventListener("mouseleave", () => {
-    accuracyChartHoverX = null;
+    resourceChartHoverX = null;
     renderChart();
 });
 

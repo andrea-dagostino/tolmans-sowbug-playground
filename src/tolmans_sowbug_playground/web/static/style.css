@@ -186,15 +186,17 @@ main {
 }
 
 #drive-chart-canvas,
-#coverage-chart-canvas {
+#coverage-chart-canvas,
+#trajectory-canvas {
     width: 100%;
     background: #fff;
     border: 1px solid #eee;
     border-radius: 3px;
     display: block;
 }
-#drive-chart-canvas { height: 160px; }
-#coverage-chart-canvas { height: 160px; }
+#drive-chart-canvas { height: 260px; }
+#coverage-chart-canvas { height: 260px; }
+#trajectory-canvas { height: 260px; }
 
 #charts-area .panel-help {
     flex-basis: 100%;
@@ -331,6 +333,16 @@ main {
     width: 2px;
     height: 100%;
     background: rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+}
+.satiety-marker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: rgba(100, 200, 255, 0.3);
+    border-right: 2px solid rgba(100, 200, 255, 0.7);
+    transition: width 0.3s ease;
     pointer-events: none;
 }
 .drive-bar span:last-child { width: 30px; font-size: 0.7rem; font-family: monospace; text-align: right; color: #666; transition: color 0.3s; }
