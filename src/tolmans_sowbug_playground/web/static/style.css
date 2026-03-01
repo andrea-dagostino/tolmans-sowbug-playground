@@ -34,18 +34,26 @@ header {
 header h1 { font-size: 1rem; font-weight: 600; }
 #tick-counter { font-family: monospace; font-size: 0.85rem; color: #666; }
 
-/* ---- Two-column layout: env 80%, sidebar 20% ---- */
+/* ---- CSS Grid: canvas / toolbar / charts | sidebar ---- */
 main {
     display: grid;
-    grid-template-columns: 4fr 1fr;
-    gap: 0.75rem;
+    grid-template-columns: 7fr 3fr;
+    grid-template-rows: 1fr auto auto;
+    grid-template-areas:
+        "canvas  sidebar"
+        "toolbar sidebar"
+        "charts  sidebar";
+    gap: 0;
     align-items: start;
 }
 
-/* Left column: Environment + Monitoring */
-#env-column {
-    display: flex;
-    flex-direction: column;
+#canvas-area  { grid-area: canvas; }
+#toolbar-area { grid-area: toolbar; }
+#charts-area  { grid-area: charts; }
+#sidebar      { grid-area: sidebar; }
+
+/* ---- Canvas ---- */
+#canvas-area {
     min-width: 0;
 }
 
@@ -60,7 +68,11 @@ main {
 
 #grid-canvas { display: block; cursor: crosshair; }
 
-/* Toolbar sits flush under canvas, same width */
+/* ---- Toolbar ---- */
+#toolbar-area {
+    min-width: 0;
+}
+
 #env-toolbar {
     background: white;
     border: 1px solid #ddd;
@@ -150,9 +162,18 @@ main {
     margin-left: auto;
 }
 
-/* ---- Monitoring charts ---- */
-#monitoring {
-    margin-top: 0.75rem;
+/* ---- Charts area (side by side) ---- */
+#charts-area {
+    display: flex;
+    gap: 0.75rem;
+    padding-top: 0.75rem;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.chart-container {
+    flex: 1;
+    min-width: 0;
 }
 
 .chart-label {
@@ -173,17 +194,27 @@ main {
     display: block;
 }
 #drive-chart-canvas { height: 160px; }
-#coverage-chart-canvas { height: 120px; }
+#coverage-chart-canvas { height: 160px; }
 
-/* ---- Right sidebar ---- */
+#charts-area .panel-help {
+    flex-basis: 100%;
+    margin-top: 0.25rem;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+}
+
+/* ---- Sidebar (independent scroll, spans all rows) ---- */
 #sidebar {
     min-width: 0;
-    max-height: calc(100vh - 80px);
+    max-height: calc(100vh - 60px);
     overflow-y: auto;
     scrollbar-width: thin;
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
+    padding-left: 0.75rem;
 }
 
 #sidebar::-webkit-scrollbar { width: 4px; }
@@ -205,25 +236,6 @@ main {
     border-bottom: 2px solid #78909C;
     margin-bottom: -0.25rem;
 }
-
-.perception-header {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.6rem;
-    font-weight: 600;
-    color: #aaa;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    margin-bottom: 0.15rem;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 0.1rem;
-}
-
-.perception-header .dot-placeholder { width: 6px; flex-shrink: 0; }
-.perception-header .type-label { flex: 1; }
-.perception-header .intensity { font-family: monospace; width: 28px; text-align: right; }
-.perception-header .distance { font-family: monospace; width: 32px; text-align: right; }
 
 /* Shared section card style */
 .panel {
@@ -259,9 +271,54 @@ main {
 #speed-control label { display: flex; align-items: center; gap: 0.3rem; }
 #speed-slider { flex: 1; margin: 0; }
 
-/* ---- Drives ---- */
+/* ---- Overlay toggles (inline) ---- */
+.overlay-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.6rem;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: #555;
+}
+.toggle-label input { cursor: pointer; }
+
+/* ---- Drives + Agent merged panel ---- */
+.drives-agent-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.drives-col {
+    flex: 1;
+    min-width: 0;
+}
+
+.agent-col {
+    flex-shrink: 0;
+    border-left: 1px solid #eee;
+    padding-left: 0.6rem;
+}
+
+.agent-col p {
+    font-size: 0.75rem;
+    color: #555;
+    margin-bottom: 0.15rem;
+    white-space: nowrap;
+}
+.agent-col span {
+    font-family: monospace;
+    color: #333;
+}
+
 .drive-bar { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.25rem; }
-.drive-bar label { width: 68px; font-size: 0.75rem; color: #555; flex-shrink: 0; }
+.drive-bar label { width: 58px; font-size: 0.7rem; color: #555; flex-shrink: 0; }
 .bar-bg { flex: 1; height: 10px; background: #eee; border-radius: 3px; overflow: hidden; position: relative; }
 .bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s, background-color 0.3s; }
 .bar-fill.hunger { background: #4CAF50; }
@@ -278,23 +335,26 @@ main {
 }
 .drive-bar span:last-child { width: 30px; font-size: 0.7rem; font-family: monospace; text-align: right; color: #666; transition: color 0.3s; }
 
-/* ---- Agent info ---- */
-#info p { font-size: 0.8rem; margin-bottom: 0.1rem; color: #555; }
-#info span { font-family: monospace; color: #333; }
-
-/* ---- Overlay toggles ---- */
-.toggle-label {
+/* ---- Perceptions ---- */
+.perception-header {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
-    font-size: 0.75rem;
-    margin-bottom: 0.1rem;
-    cursor: pointer;
-    color: #555;
+    gap: 0.25rem;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.15rem;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.1rem;
 }
-.toggle-label input { cursor: pointer; }
 
-/* ---- Perceptions ---- */
+.perception-header .dot-placeholder { width: 6px; flex-shrink: 0; }
+.perception-header .type-label { flex: 1; }
+.perception-header .intensity { font-family: monospace; width: 28px; text-align: right; }
+.perception-header .distance { font-family: monospace; width: 32px; text-align: right; }
+
 #perception-list {}
 
 .perception-item {
@@ -317,10 +377,16 @@ main {
 
 .empty-state { font-style: italic; color: #bbb; font-size: 0.75rem; }
 
-/* ---- Memory stats ---- */
+/* ---- Memory / Deliberation merged panel ---- */
 #memory-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.1rem 0.5rem; }
 #memory-stats p { font-size: 0.75rem; color: #555; }
 #memory-stats span { font-family: monospace; color: #333; }
+
+.panel-divider {
+    height: 1px;
+    background: #eee;
+    margin: 0.4rem 0;
+}
 
 /* ---- VTE deliberation ---- */
 .vte-header {
@@ -387,9 +453,15 @@ main {
 @media (max-width: 1200px) {
     main {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "canvas"
+            "toolbar"
+            "sidebar"
+            "charts";
     }
     #sidebar {
         max-height: none;
+        padding-left: 0;
         flex-direction: row;
         flex-wrap: wrap;
         gap: 0.5rem;
@@ -417,6 +489,9 @@ main {
     .toolbar-sep {
         width: 100%;
         height: 1px;
+    }
+    #charts-area {
+        flex-direction: column;
     }
 }
 
