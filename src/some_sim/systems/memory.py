@@ -1,6 +1,8 @@
 from collections import deque
 from dataclasses import dataclass
 
+import numpy as np
+
 from some_sim.core.stimulus import StimulusType
 
 
@@ -14,10 +16,14 @@ class MemoryEntry:
 
 class MemorySystem:
     def __init__(
-        self, learning_rate: float = 0.1, decay_rate: float = 0.01
+        self,
+        learning_rate: float = 0.1,
+        decay_rate: float = 0.01,
+        kernel_bandwidth: float = 2.0,
     ) -> None:
         self.learning_rate = learning_rate
         self.decay_rate = decay_rate
+        self.kernel_bandwidth = kernel_bandwidth
         self.cognitive_map: dict[tuple[int, int], list[MemoryEntry]] = {}
         self.edges: dict[tuple[tuple[int, int], tuple[int, int]], int] = {}
         self.visited: dict[tuple[int, int], float] = {}
@@ -61,19 +67,61 @@ class MemorySystem:
                 return entry
         return None
 
-    def get_best_location_for(
-        self, stimulus_type: StimulusType
-    ) -> tuple[int, int] | None:
-        best_pos = None
-        best_score = -1.0
+    def compute_density_field(
+        self,
+        grid_width: int,
+        grid_height: int,
+        stimulus_type: StimulusType | None = None,
+    ) -> np.ndarray:
+        field = np.zeros((grid_height, grid_width))
+        points: list[tuple[int, int, float]] = []
         for pos, entries in self.cognitive_map.items():
             for entry in entries:
-                if entry.stimulus_type == stimulus_type:
-                    score = entry.reward_value * entry.strength
-                    if score > best_score:
-                        best_score = score
-                        best_pos = pos
-        return best_pos
+                if stimulus_type is not None and entry.stimulus_type != stimulus_type:
+                    continue
+                weight = entry.reward_value * entry.strength
+                if weight > 0:
+                    points.append((pos[0], pos[1], weight))
+        if not points:
+            return field
+        sigma = self.kernel_bandwidth
+        if sigma <= 0:
+            for px, py, w in points:
+                if 0 <= px < grid_width and 0 <= py < grid_height:
+                    field[py, px] += w
+            return field
+        xs = np.arange(grid_width)
+        ys = np.arange(grid_height)
+        gx, gy = np.meshgrid(xs, ys)
+        for px, py, w in points:
+            dist_sq = (gx - px) ** 2 + (gy - py) ** 2
+            field += w * np.exp(-dist_sq / (2 * sigma**2))
+        return field
+
+    def get_best_location_for(
+        self,
+        stimulus_type: StimulusType,
+        grid_width: int = 20,
+        grid_height: int = 20,
+    ) -> tuple[int, int] | None:
+        if self.kernel_bandwidth <= 0:
+            best_pos = None
+            best_score = -1.0
+            for pos, entries in self.cognitive_map.items():
+                for entry in entries:
+                    if entry.stimulus_type == stimulus_type:
+                        score = entry.reward_value * entry.strength
+                        if score > best_score:
+                            best_score = score
+                            best_pos = pos
+            return best_pos
+        field = self.compute_density_field(grid_width, grid_height, stimulus_type)
+        max_val = field.max()
+        if max_val == 0:
+            return None
+        flat_idx = int(np.argmax(field))
+        row, col = np.unravel_index(flat_idx, field.shape)
+        return (int(col), int(row))
 
     def record_visit(self, position: tuple[int, int]) -> None:
         self.visited[position] = 1.0

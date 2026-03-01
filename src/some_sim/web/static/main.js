@@ -23,6 +23,7 @@ let ws = null;
 let latestState = null;
 let showCognitiveMap = true;
 let showPerception = true;
+let showDensityField = true;
 
 function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -46,6 +47,27 @@ function send(data) {
 }
 
 // --- Overlay rendering ---
+
+function densityColor(value) {
+    const r = Math.round(128 + 127 * value);
+    const g = Math.round(200 * value * value);
+    const b = Math.round(180 * (1 - value));
+    return `rgb(${r},${g},${b})`;
+}
+
+function renderDensityField(state) {
+    if (!state.agents || state.agents.length === 0) return;
+    const agent = state.agents[0];
+    if (!agent.density_field) return;
+
+    for (const [key, density] of Object.entries(agent.density_field)) {
+        const [gx, gy] = key.split(",").map(Number);
+        ctx.globalAlpha = Math.min(density * 0.45, 0.45);
+        ctx.fillStyle = densityColor(density);
+        ctx.fillRect(gx * CELL_SIZE, gy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    }
+    ctx.globalAlpha = 1.0;
+}
 
 function renderCognitiveMap(state) {
     if (!state.agents || state.agents.length === 0) return;
@@ -211,6 +233,11 @@ function render(state) {
         ctx.stroke();
     }
 
+    // 1.5. Density field heatmap
+    if (showDensityField) {
+        renderDensityField(state);
+    }
+
     // 2. Cognitive map (edges + nodes)
     if (showCognitiveMap) {
         renderCognitiveMap(state);
@@ -316,6 +343,11 @@ function updateMemorySummary(agent) {
     document.getElementById("mem-edges").textContent = edgeCount;
     document.getElementById("mem-visited").textContent = visitedCount;
     document.getElementById("mem-strength").textContent = avgStrength.toFixed(2);
+
+    const densityField = agent.density_field || {};
+    const densityValues = Object.values(densityField);
+    const densityPeak = densityValues.length > 0 ? Math.max(...densityValues) : 0;
+    document.getElementById("mem-density-peak").textContent = densityPeak.toFixed(2);
 }
 
 function updateDashboard(state) {
@@ -365,6 +397,10 @@ document.getElementById("toggle-cogmap").onchange = (e) => {
 };
 document.getElementById("toggle-perception").onchange = (e) => {
     showPerception = e.target.checked;
+    if (latestState) render(latestState);
+};
+document.getElementById("toggle-density").onchange = (e) => {
+    showDensityField = e.target.checked;
     if (latestState) render(latestState);
 };
 

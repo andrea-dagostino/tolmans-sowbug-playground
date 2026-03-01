@@ -84,4 +84,22 @@ class Agent(ABC):
                 f"{pos[0]},{pos[1]}": round(familiarity, 3)
                 for pos, familiarity in self.memory_system.visited.items()
             },
+            "density_field": self._compute_density_state(),
         }
+
+    def _compute_density_state(self) -> dict[str, float]:
+        if self.memory_system.kernel_bandwidth <= 0:
+            return {}
+        grid_w, grid_h = getattr(self, "_grid_size", (20, 20))
+        field = self.memory_system.compute_density_field(grid_w, grid_h)
+        max_val = field.max()
+        if max_val == 0:
+            return {}
+        normalized = field / max_val
+        result: dict[str, float] = {}
+        for y in range(grid_h):
+            for x in range(grid_w):
+                val = float(normalized[y, x])
+                if val > 0.01:
+                    result[f"{x},{y}"] = round(val, 3)
+        return result

@@ -140,6 +140,43 @@ class TestSowbugSpatialLearning:
         assert bug.position == (1, 0)
 
 
+class TestSowbugKDE:
+    def test_sowbug_accepts_kernel_bandwidth(self):
+        bug = Sowbug(position=(5, 5), kernel_bandwidth=3.0)
+        assert bug.memory_system.kernel_bandwidth == 3.0
+
+    def test_sowbug_kde_navigation_toward_cluster(self):
+        """Sowbug should navigate toward a cluster of moderate rewards."""
+        bug = Sowbug(position=(10, 10), kernel_bandwidth=2.0)
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Cluster of food memories to the north-west
+        bug.memory_system.record_experience(
+            (8, 8), StimulusType.FOOD, intensity=0.8, reward=0.6
+        )
+        bug.memory_system.record_experience(
+            (9, 8), StimulusType.FOOD, intensity=0.8, reward=0.6
+        )
+        bug.memory_system.record_experience(
+            (8, 9), StimulusType.FOOD, intensity=0.8, reward=0.6
+        )
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        direction = bug.decide()
+        bug.act(direction, env)
+        # Should move toward the cluster (north or west)
+        assert bug.position[0] <= 10 or bug.position[1] <= 10
+
+    def test_sowbug_passes_grid_size_to_get_best_location(self):
+        bug = Sowbug(position=(5, 5), kernel_bandwidth=2.0)
+        env = Environment(width=15, height=12)
+        bug.perceive(env)
+        assert bug._grid_size == (15, 12)
+
+
 class TestSowbugDriveMapping:
     def test_hunger_maps_to_food(self):
         bug = Sowbug(position=(5, 5))

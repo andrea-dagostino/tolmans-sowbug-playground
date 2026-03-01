@@ -60,3 +60,4 @@ agent:
   perception_radius: 5.0
   learning_rate: 0.1
   decay_rate: 0.01
+  kernel_bandwidth: 2.0

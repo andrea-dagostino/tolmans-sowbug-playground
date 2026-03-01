@@ -116,3 +116,20 @@ class TestAgent:
         assert isinstance(p["perceived_intensity"], float)
         assert isinstance(p["distance"], float)
         assert p["direction"] == [0, -2]
+
+    def test_get_state_includes_density_field(self):
+        agent = self._make_agent()
+        agent.memory_system.record_experience(
+            (3, 4), StimulusType.FOOD, 0.8, 1.0
+        )
+        state = agent.get_state()
+        assert "density_field" in state
+        assert isinstance(state["density_field"], dict)
+        assert "3,4" in state["density_field"]
+        assert state["density_field"]["3,4"] == 1.0  # peak is normalized to 1.0
+
+    def test_get_state_density_field_empty_when_no_memories(self):
+        agent = self._make_agent()
+        state = agent.get_state()
+        assert "density_field" in state
+        assert state["density_field"] == {}

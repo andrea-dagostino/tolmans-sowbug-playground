@@ -27,6 +27,7 @@ class Sowbug(Agent):
         perception_radius: float = 5.0,
         learning_rate: float = 0.1,
         decay_rate: float = 0.01,
+        kernel_bandwidth: float = 2.0,
     ) -> None:
         drive_system = DriveSystem(
             drives=[
@@ -41,10 +42,17 @@ class Sowbug(Agent):
             drive_system=drive_system,
             sensor_system=SensorSystem(perception_radius=perception_radius),
             memory_system=MemorySystem(
-                learning_rate=learning_rate, decay_rate=decay_rate
+                learning_rate=learning_rate,
+                decay_rate=decay_rate,
+                kernel_bandwidth=kernel_bandwidth,
             ),
             motor_system=MotorSystem(),
         )
+        self._grid_size: tuple[int, int] = (20, 20)
+
+    def perceive(self, environment: Environment) -> None:
+        self._grid_size = (environment.width, environment.height)
+        super().perceive(environment)
 
     def _drive_to_stimulus(self, drive_type: DriveType) -> StimulusType:
         return DRIVE_STIMULUS_MAP[drive_type]
@@ -118,7 +126,9 @@ class Sowbug(Agent):
 
         target_stimulus = self._drive_to_stimulus(urgent.drive_type)
 
-        remembered_pos = self.memory_system.get_best_location_for(target_stimulus)
+        remembered_pos = self.memory_system.get_best_location_for(
+            target_stimulus, self._grid_size[0], self._grid_size[1]
+        )
         if remembered_pos is not None and remembered_pos != self.position:
             direction = self._navigate_toward(remembered_pos)
         else:
