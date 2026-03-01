@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 
 
@@ -24,8 +26,7 @@ class TestStimulus:
         assert s.position == (5, 3)
         assert s.intensity == 0.8
         assert s.radius == 4.0
-        assert s.depletes is False
-        assert s.depletion_rate == 0.0
+        assert s.quantity is None
 
     def test_distance_to_same_position(self):
         s = Stimulus(StimulusType.FOOD, position=(3, 4), intensity=1.0, radius=5.0)
@@ -54,14 +55,39 @@ class TestStimulus:
         intensity = s.perceived_intensity_at((5, 0))
         assert intensity == 0.0
 
-    def test_depletable_stimulus(self):
-        s = Stimulus(
-            StimulusType.FOOD,
-            position=(0, 0),
-            intensity=1.0,
-            radius=5.0,
-            depletes=True,
-            depletion_rate=0.1,
-        )
-        assert s.depletes is True
-        assert s.depletion_rate == 0.1
+
+class TestQuantity:
+    def test_default_quantity_is_none(self):
+        s = Stimulus(StimulusType.FOOD, (0, 0), intensity=1.0, radius=5.0)
+        assert s.quantity is None
+        assert s.depleted is False
+
+    def test_consume_infinite_returns_full_amount(self):
+        s = Stimulus(StimulusType.HEAT, (0, 0), intensity=1.0, radius=5.0)
+        actual = s.consume(0.5)
+        assert actual == 0.5
+        assert s.intensity == 1.0  # unchanged
+
+    def test_consume_finite_reduces_quantity_and_scales_intensity(self):
+        s = Stimulus(StimulusType.FOOD, (0, 0), intensity=1.0, radius=5.0, quantity=10.0)
+        actual = s.consume(2.0)
+        assert actual == 2.0
+        assert s.quantity == 8.0
+        assert s.intensity == pytest.approx(0.8)  # 1.0 * (8/10)
+
+    def test_consume_cannot_take_more_than_remaining(self):
+        s = Stimulus(StimulusType.FOOD, (0, 0), intensity=1.0, radius=5.0, quantity=1.0)
+        actual = s.consume(5.0)
+        assert actual == 1.0
+        assert s.quantity == 0.0
+
+    def test_depleted_when_quantity_zero(self):
+        s = Stimulus(StimulusType.FOOD, (0, 0), intensity=1.0, radius=5.0, quantity=1.0)
+        s.consume(1.0)
+        assert s.depleted is True
+
+    def test_half_quantity_half_intensity(self):
+        s = Stimulus(StimulusType.WATER, (0, 0), intensity=0.8, radius=3.0, quantity=4.0)
+        s.consume(2.0)
+        assert s.quantity == 2.0
+        assert s.intensity == pytest.approx(0.4)  # 0.8 * (2/4)

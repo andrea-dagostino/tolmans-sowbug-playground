@@ -6,13 +6,17 @@ Built for researchers and devs interested in computational psychology, agent-bas
 
 ![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
+![Sowbug Intro](assets/sowbug_intro.gif)
+
 ## Features
 
 **Agent with internal state** — Three drives (hunger, thirst, temperature) that rise over time and get satisfied by reaching the right stimulus. The agent perceives stimuli within a radius, remembers where it found things (cognitive map), and navigates or explores accordingly.
 
 **Decision-making model** — When the agent knows where to go, it navigates directly. When uncertain, it engages in Vicarious Trial and Error (VTE) — mentally evaluating each direction before committing. Sometimes it hesitates. Sometimes it explores randomly. Drives compete for attention.
 
-**Interactive web UI** — Real-time canvas rendering with overlays for perception radius, cognitive map edges, KDE density heatmaps, and VTE deliberation arrows. Place/remove stimuli by clicking the grid. Adjust speed, grid size, toggle overlays, load environment presets.
+**Realistic extinction** — When a stimulus is consumed and depleted, the agent doesn't get stuck revisiting the empty location forever. A disappointment counter tracks consecutive failed visits and accelerates memory decay exponentially — the agent persists for 2-3 visits (initial persistence), then rapidly moves on to explore elsewhere.
+
+**Interactive web UI** — Real-time canvas rendering with overlays for perception radius, cognitive map edges, KDE density heatmaps, and VTE deliberation arrows. A cumulative trajectory heatmap (KDE without decay) shows where the agent spends its time across the full run. Place/remove stimuli by clicking the grid. Adjust speed, grid size, toggle overlays, load environment presets.
 
 **Headless mode + analysis** — Run batch experiments from CLI, export to JSON/CSV, generate plots (drive levels, exploration heatmaps, learning curves).
 

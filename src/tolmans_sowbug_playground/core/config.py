@@ -24,8 +24,7 @@ class StimulusConfig:
     position: tuple[int, int]
     intensity: float
     radius: float
-    depletes: bool = False
-    depletion_rate: float = 0.0
+    quantity: float | None = None
 
 
 @dataclass
@@ -62,8 +61,7 @@ def load_config(path: str) -> SimulationConfig:
                 position=tuple(s["position"]),
                 intensity=s.get("intensity", 1.0),
                 radius=s.get("radius", 5.0),
-                depletes=s.get("depletes", False),
-                depletion_rate=s.get("depletion_rate", 0.0),
+                quantity=s.get("quantity"),
             )
         )
 
@@ -96,8 +94,7 @@ def build_simulation(config: SimulationConfig) -> Simulation:
                 position=sc.position,
                 intensity=sc.intensity,
                 radius=sc.radius,
-                depletes=sc.depletes,
-                depletion_rate=sc.depletion_rate,
+                quantity=sc.quantity,
             )
         )
 

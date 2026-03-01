@@ -85,24 +85,19 @@ class TestPassability:
 
 
 class TestEnvironmentUpdate:
-    def test_update_depletes_consumed_stimuli(self):
+    def test_update_keeps_non_depleted_stimuli(self):
         env = Environment(width=10, height=10)
-        s = Stimulus(
-            StimulusType.FOOD, (5, 5), intensity=1.0, radius=3.0,
-            depletes=True, depletion_rate=0.2,
-        )
+        s = Stimulus(StimulusType.FOOD, (5, 5), intensity=1.0, radius=3.0, quantity=5.0)
         env.add_stimulus(s)
-        s._consumed = True
+        s.consume(1.0)  # still has quantity remaining
         env.update()
-        assert s.intensity == 0.8
+        assert s in env.stimuli
 
-    def test_update_removes_fully_depleted(self):
+    def test_update_removes_depleted_stimuli(self):
         env = Environment(width=10, height=10)
-        s = Stimulus(
-            StimulusType.FOOD, (5, 5), intensity=0.05, radius=3.0,
-            depletes=True, depletion_rate=0.1,
-        )
+        s = Stimulus(StimulusType.FOOD, (5, 5), intensity=1.0, radius=3.0, quantity=1.0)
         env.add_stimulus(s)
-        s._consumed = True
+        s.consume(1.0)  # quantity now 0
+        assert s.depleted is True
         env.update()
         assert s not in env.stimuli

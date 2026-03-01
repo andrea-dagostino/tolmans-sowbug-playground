@@ -10,3 +10,4 @@ output_*.csv
 results/
 .pytest_cache/
 .claude/
+docs/

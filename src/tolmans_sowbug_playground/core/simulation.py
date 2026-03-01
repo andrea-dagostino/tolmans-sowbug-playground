@@ -49,6 +49,8 @@ class Simulation:
                     "type": s.stimulus_type.value,
                     "position": list(s.position),
                     "intensity": s.intensity,
+                    "radius": s.radius,
+                    "quantity": s.quantity,
                 }
                 for s in self.environment.stimuli
             ],

@@ -39,12 +39,4 @@ class Environment:
         return True
 
     def update(self) -> None:
-        to_remove = []
-        for s in self.stimuli:
-            if s.depletes and getattr(s, "_consumed", False):
-                s.intensity -= s.depletion_rate
-                s._consumed = False
-                if s.intensity <= 0.0:
-                    to_remove.append(s)
-        for s in to_remove:
-            self.stimuli.remove(s)
+        self.stimuli = [s for s in self.stimuli if not s.depleted]
