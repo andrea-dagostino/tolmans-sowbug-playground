@@ -93,12 +93,19 @@ function connectWebSocket() {
 
             // Track drive levels
             const drives = agent.drive_levels || {};
-            const entry = { tick, hunger: 0, thirst: 0, temperature: 0 };
+            const satiety = agent.satiety_levels || {};
+            const entry = { tick, hunger: 0, thirst: 0, temperature: 0, sat_hunger: 0, sat_thirst: 0, sat_temperature: 0 };
             for (const [k, v] of Object.entries(drives)) {
                 const kl = k.toLowerCase();
                 if (kl.includes("hunger")) entry.hunger = v;
                 else if (kl.includes("thirst")) entry.thirst = v;
                 else if (kl.includes("temperature")) entry.temperature = v;
+            }
+            for (const [k, v] of Object.entries(satiety)) {
+                const kl = k.toLowerCase();
+                if (kl.includes("hunger")) entry.sat_hunger = v;
+                else if (kl.includes("thirst")) entry.sat_thirst = v;
+                else if (kl.includes("temperature")) entry.sat_temperature = v;
             }
             driveHistory.push(entry);
 
@@ -691,14 +698,17 @@ function renderDriveChart() {
 
     // Draw a line series
     const series = [
-        { key: "hunger",      color: "#4CAF50", label: "Hunger",      dash: [] },
-        { key: "thirst",      color: "#2196F3", label: "Thirst",      dash: [6, 3] },
-        { key: "temperature", color: "#F44336", label: "Temperature", dash: [2, 2] },
+        { key: "hunger",          color: "#4CAF50", label: "Hunger",  dash: [],     lineWidth: 2 },
+        { key: "thirst",          color: "#2196F3", label: "Thirst",  dash: [6, 3], lineWidth: 2 },
+        { key: "temperature",     color: "#F44336", label: "Temp",    dash: [2, 2], lineWidth: 2 },
+        { key: "sat_hunger",      color: "#4CAF50", label: "Sat(H)",  dash: [2, 4], lineWidth: 1 },
+        { key: "sat_thirst",      color: "#2196F3", label: "Sat(T)",  dash: [2, 4], lineWidth: 1 },
+        { key: "sat_temperature", color: "#F44336", label: "Sat(Tp)", dash: [2, 4], lineWidth: 1 },
     ];
 
     for (const s of series) {
         cCtx.strokeStyle = s.color;
-        cCtx.lineWidth = 2;
+        cCtx.lineWidth = s.lineWidth || 2;
         cCtx.setLineDash(s.dash);
         cCtx.beginPath();
         for (let i = 0; i < driveHistory.length; i++) {
@@ -720,7 +730,7 @@ function renderDriveChart() {
     cCtx.textBaseline = "top";
     for (const s of series) {
         cCtx.strokeStyle = s.color;
-        cCtx.lineWidth = 2;
+        cCtx.lineWidth = s.lineWidth || 2;
         cCtx.setLineDash(s.dash);
         cCtx.beginPath();
         cCtx.moveTo(legendX, legendY + 2);
