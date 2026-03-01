@@ -254,6 +254,12 @@ class Sowbug(Agent):
                 self.drive_system.satisfy(DriveType.THIRST, 0.3)
                 reward = 1.0
                 stimulus._consumed = True
+            elif (
+                stimulus.stimulus_type == StimulusType.HEAT
+                and self.drive_system.get_level(DriveType.TEMPERATURE) > 0.1
+            ):
+                self.drive_system.satisfy(DriveType.TEMPERATURE, 0.3)
+                reward = 1.0
 
             self.memory_system.record_experience(
                 self.position,
