@@ -31,6 +31,7 @@
                             <option value="Basic Foraging">Basic Foraging</option>
                             <option value="Choice Point">Choice Point</option>
                             <option value="Light + Drives">Light + Drives</option>
+                            <option value="Maze">Maze</option>
                         </select>
                         <label>W <input type="number" id="grid-width" value="20" min="5" max="100" aria-label="Grid width"></label>
                         <label>H <input type="number" id="grid-height" value="20" min="5" max="100" aria-label="Grid height"></label>
@@ -56,19 +57,23 @@
             <div id="charts-area">
                 <div class="chart-container">
                     <h3 class="chart-label">Drives over time</h3>
-                    <canvas id="drive-chart-canvas" height="160" aria-label="Drive levels over time chart" role="img"></canvas>
+                    <canvas id="drive-chart-canvas" height="260" aria-label="Drive levels over time chart" role="img"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3 class="chart-label">Prediction Accuracy</h3>
-                    <canvas id="coverage-chart-canvas" height="160" aria-label="Prediction accuracy over time chart" role="img"></canvas>
+                    <h3 class="chart-label">Resource Gathering</h3>
+                    <canvas id="coverage-chart-canvas" height="260" aria-label="Resource gathering over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 class="chart-label">Trajectory</h3>
+                    <canvas id="trajectory-canvas" height="260" aria-label="Agent trajectory chart showing cumulative path with cardinal directions" role="img"></canvas>
                 </div>
                 <details class="panel-help">
                     <summary>?</summary>
                     <dl>
                         <dt>Drive Chart</dt>
                         <dd>Plots the drive level for hunger, thirst and temperature over simulation ticks. Drives rise at a fixed rate and drop when the agent reaches the matching stimulus.</dd>
-                        <dt>Prediction Accuracy</dt>
-                        <dd>Cumulative accuracy of the agent's expectations vs. reality. Each time the agent updates a memory, the pre-update error is recorded. Accuracy = 1 - (cumulative error / prediction count). Trends upward as the agent learns.</dd>
+                        <dt>Resource Gathering</dt>
+                        <dd>Tracks how efficiently the agent gathers resources over time. The solid line shows cumulative resource consumptions (drive-reducing visits). The faded line shows a rolling rate (consumptions per 20 ticks). A steeper cumulative slope indicates faster resource gathering.</dd>
                     </dl>
                 </details>
             </div>

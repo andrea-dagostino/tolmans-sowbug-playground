@@ -1,0 +1,185 @@
+grid:
+  width: 20
+  height: 20
+
+simulation:
+  max_ticks: 1000
+  random_seed: 42
+
+stimuli:
+  # Food rewards
+  - type: food
+    position: [14, 4]
+    intensity: 1.0
+    radius: 5.0
+    quantity: 5.0
+
+  - type: food
+    position: [5, 11]
+    intensity: 1.0
+    radius: 5.0
+    quantity: 5.0
+
+  - type: food
+    position: [15, 16]
+    intensity: 1.0
+    radius: 5.0
+    quantity: 5.0
+
+  # Water rewards
+  - type: water
+    position: [4, 4]
+    intensity: 1.0
+    radius: 5.0
+    quantity: 5.0
+
+  - type: water
+    position: [14, 11]
+    intensity: 1.0
+    radius: 5.0
+    quantity: 5.0
+
+  - type: water
+    position: [4, 16]
+    intensity: 1.0
+    radius: 5.0
+    quantity: 5.0
+
+  # Upper-left room walls (rows 2-6)
+  - {type: obstacle, position: [2, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [3, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [4, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [5, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [6, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 3], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 3], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 4], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 4], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 5], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [3, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [4, 6], intensity: 1.0, radius: 0.0}
+
+  # Upper-right room walls (rows 2-6)
+  - {type: obstacle, position: [12, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [13, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [14, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [15, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [16, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 2], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 3], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 3], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 4], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 4], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 5], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [15, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [16, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 6], intensity: 1.0, radius: 0.0}
+
+  # Central horizontal walls (row 6)
+  - {type: obstacle, position: [6, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [8, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [9, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [10, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [11, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 6], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [13, 6], intensity: 1.0, radius: 0.0}
+
+  # Central horizontal walls (row 8)
+  - {type: obstacle, position: [2, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [3, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [4, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [6, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [8, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [9, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [10, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [11, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [13, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [15, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [16, 8], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 8], intensity: 1.0, radius: 0.0}
+
+  # Middle-left room walls (rows 8-12)
+  - {type: obstacle, position: [2, 9], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 10], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 10], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 11], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 11], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [3, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [4, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [5, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [6, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 12], intensity: 1.0, radius: 0.0}
+
+  # Middle-right room walls (rows 8-12)
+  - {type: obstacle, position: [17, 9], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 10], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 10], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 11], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 11], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [13, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [14, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [15, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [16, 12], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 12], intensity: 1.0, radius: 0.0}
+
+  # Lower-left room walls (rows 14-18)
+  - {type: obstacle, position: [2, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [3, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [4, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [5, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [6, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [8, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 15], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [8, 15], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 16], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 17], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [8, 17], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [2, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [3, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [4, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [5, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [6, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [7, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [8, 18], intensity: 1.0, radius: 0.0}
+
+  # Lower-right room walls (rows 14-18)
+  - {type: obstacle, position: [11, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [13, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [14, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [15, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [16, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 14], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [11, 15], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 15], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 16], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [11, 17], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 17], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [11, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [12, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [13, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [14, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [15, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [16, 18], intensity: 1.0, radius: 0.0}
+  - {type: obstacle, position: [17, 18], intensity: 1.0, radius: 0.0}
+
+agent:
+  type: sowbug
+  position: [9, 9]
+  hunger_rate: 0.01
+  thirst_rate: 0.008
+  temperature_rate: 0.005
+  perception_radius: 5.0
+  learning_rate: 0.1
+  decay_rate: 0.01
+  kernel_bandwidth: 2.0
+  vte_horizon: 5
+  vte_threshold: 0.8

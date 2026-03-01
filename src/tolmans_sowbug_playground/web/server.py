@@ -13,6 +13,25 @@ from tolmans_sowbug_playground.core.simulation import Simulation
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Maze wall positions (x, y) for the multi-corridor preset
+_MAZE_WALLS: list[tuple[int, int]] = (
+    [(x, 2) for x in (2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 16, 17)]
+    + [(x, 3) for x in (2, 7, 12, 17)]
+    + [(x, 4) for x in (2, 7, 12, 17)]
+    + [(x, 5) for x in (2, 17)]
+    + [(x, 6) for x in (2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17)]
+    + [(x, 8) for x in (2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17)]
+    + [(x, 9) for x in (2, 17)]
+    + [(x, 10) for x in (2, 7, 12, 17)]
+    + [(x, 11) for x in (2, 7, 12, 17)]
+    + [(x, 12) for x in (2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 16, 17)]
+    + [(x, 14) for x in (2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17)]
+    + [(x, 15) for x in (2, 8, 11, 17)]
+    + [(x, 16) for x in (2, 17)]
+    + [(x, 17) for x in (2, 8, 11, 17)]
+    + [(x, 18) for x in (2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17)]
+)
+
 # Environment presets
 PRESETS: dict[str, dict] = {
     "Empty": {
@@ -26,11 +45,11 @@ PRESETS: dict[str, dict] = {
         "grid_height": 25,
         "agent_position": (12, 12),
         "stimuli": [
-            {"type": "food", "position": (5, 5)},
-            {"type": "food", "position": (20, 8)},
-            {"type": "food", "position": (10, 20)},
-            {"type": "water", "position": (18, 18)},
-            {"type": "water", "position": (3, 15)},
+            {"type": "food", "position": (5, 5), "quantity": 5.0},
+            {"type": "food", "position": (20, 8), "quantity": 5.0},
+            {"type": "food", "position": (10, 20), "quantity": 5.0},
+            {"type": "water", "position": (18, 18), "quantity": 5.0},
+            {"type": "water", "position": (3, 15), "quantity": 5.0},
         ],
     },
     "Choice Point": {
@@ -38,8 +57,8 @@ PRESETS: dict[str, dict] = {
         "grid_height": 20,
         "agent_position": (10, 10),
         "stimuli": [
-            {"type": "food", "position": (3, 10)},
-            {"type": "food", "position": (17, 10)},
+            {"type": "food", "position": (3, 10), "quantity": 5.0},
+            {"type": "food", "position": (17, 10), "quantity": 5.0},
         ],
     },
     "Light + Drives": {
@@ -48,8 +67,24 @@ PRESETS: dict[str, dict] = {
         "agent_position": (10, 10),
         "stimuli": [
             {"type": "light", "position": (3, 3)},
-            {"type": "food", "position": (17, 17)},
-            {"type": "water", "position": (17, 3)},
+            {"type": "food", "position": (17, 17), "quantity": 5.0},
+            {"type": "water", "position": (17, 3), "quantity": 5.0},
+        ],
+    },
+    "Maze": {
+        "grid_width": 20,
+        "grid_height": 20,
+        "agent_position": (9, 9),
+        "stimuli": [
+            {"type": "food", "position": (14, 4), "quantity": 5.0},
+            {"type": "food", "position": (5, 11), "quantity": 5.0},
+            {"type": "food", "position": (15, 16), "quantity": 5.0},
+            {"type": "water", "position": (4, 4), "quantity": 5.0},
+            {"type": "water", "position": (14, 11), "quantity": 5.0},
+            {"type": "water", "position": (4, 16), "quantity": 5.0},
+        ] + [
+            {"type": "obstacle", "position": p, "intensity": 1.0, "radius": 0.0}
+            for p in _MAZE_WALLS
         ],
     },
 }
@@ -119,6 +154,7 @@ async def websocket_endpoint(ws: WebSocket):
                                 position=tuple(data["position"]),
                                 intensity=data.get("intensity", 1.0),
                                 radius=data.get("radius", 5.0),
+                                quantity=data.get("quantity"),
                             )
                         )
                         if not _running:
@@ -169,6 +205,7 @@ async def websocket_endpoint(ws: WebSocket):
                                 position=tuple(s["position"]),
                                 intensity=s.get("intensity", 1.0),
                                 radius=s.get("radius", 5.0),
+                                quantity=s.get("quantity"),
                             )
                             for s in preset["stimuli"]
                         ]
@@ -185,12 +222,15 @@ async def websocket_endpoint(ws: WebSocket):
                     if preset_name and _simulation and _config:
                         stimuli_list = []
                         for s in _simulation.environment.stimuli:
-                            stimuli_list.append({
+                            entry = {
                                 "type": s.stimulus_type.value,
                                 "position": s.position,
                                 "intensity": s.intensity,
                                 "radius": s.radius,
-                            })
+                            }
+                            if s.quantity is not None:
+                                entry["quantity"] = s.quantity
+                            stimuli_list.append(entry)
                         PRESETS[preset_name] = {
                             "grid_width": _config.grid_width,
                             "grid_height": _config.grid_height,
