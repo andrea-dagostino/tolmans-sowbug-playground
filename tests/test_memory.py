@@ -16,6 +16,14 @@ class TestMemoryEntry:
         assert entry.reward_value == 1.0
         assert entry.strength == 1.0
 
+    def test_creation_default_disappointments(self):
+        entry = MemoryEntry(
+            stimulus_type=StimulusType.FOOD,
+            expected_intensity=0.8,
+            reward_value=1.0,
+        )
+        assert entry.disappointments == 0
+
 
 class TestMemorySystem:
     def test_record_and_retrieve_experience(self):
@@ -393,3 +401,123 @@ class TestDensityField:
         mem.record_experience((3, 3), StimulusType.FOOD, intensity=0.5, reward=0.5)
         best = mem.get_best_location_for(StimulusType.FOOD)
         assert best == (5, 5)
+
+
+class TestPredictionAccuracy:
+    def test_initial_accuracy_is_zero(self):
+        mem = MemorySystem()
+        assert mem.prediction_accuracy == 0.0
+        assert mem.prediction_count == 0
+
+    def test_perfect_prediction_gives_accuracy_one(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.update_expectation(
+            (5, 5), StimulusType.FOOD, actual_intensity=0.8, actual_reward=1.0
+        )
+        assert mem.prediction_count == 1
+        assert mem.prediction_accuracy == 1.0
+
+    def test_imperfect_prediction_gives_correct_value(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        # Actual: intensity=0.4, reward=0.6
+        # Pre-error: (|0.4 - 0.8| + |0.6 - 1.0|) / 2 = (0.4 + 0.4) / 2 = 0.4
+        mem.update_expectation(
+            (5, 5), StimulusType.FOOD, actual_intensity=0.4, actual_reward=0.6
+        )
+        assert mem.prediction_count == 1
+        assert abs(mem.cumulative_prediction_error - 0.4) < 1e-9
+        assert abs(mem.prediction_accuracy - 0.6) < 1e-9
+
+    def test_accumulates_over_multiple_predictions(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        # Perfect prediction: error = 0
+        mem.update_expectation(
+            (5, 5), StimulusType.FOOD, actual_intensity=0.8, actual_reward=1.0
+        )
+        # After learning-rate update, expected_intensity ~ 0.8, reward ~ 1.0
+        # Second prediction with mismatch
+        mem.update_expectation(
+            (5, 5), StimulusType.FOOD, actual_intensity=0.4, actual_reward=0.6
+        )
+        assert mem.prediction_count == 2
+        assert mem.prediction_accuracy < 1.0
+        assert mem.prediction_accuracy > 0.0
+
+    def test_missing_entry_does_not_increment_count(self):
+        mem = MemorySystem()
+        mem.update_expectation(
+            (5, 5), StimulusType.FOOD, actual_intensity=0.8, actual_reward=1.0
+        )
+        assert mem.prediction_count == 0
+        assert mem.prediction_accuracy == 0.0
+
+
+class TestDisappointmentExtinction:
+    def test_first_disappointment_increments_counter(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.disappointments == 1
+
+    def test_disappointments_accumulate(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.disappointments == 3
+
+    def test_strength_decays_exponentially_with_disappointments(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        # Visit 1: strength -= 0.1 * 2^1 = 0.2 -> 0.8
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert abs(entry.strength - 0.8) < 1e-9
+        # Visit 2: strength -= 0.1 * 2^2 = 0.4 -> 0.4
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        assert abs(entry.strength - 0.4) < 1e-9
+        # Visit 3: strength -= 0.1 * 2^3 = 0.8 -> clamped to 0.0
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        assert entry.strength == 0.0
+
+    def test_extinction_curve_forgotten_by_visit_four(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        for _ in range(4):
+            mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.strength == 0.0
+
+    def test_stimulus_present_resets_disappointments(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.disappointments == 2
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.8, 1.0)
+        assert entry.disappointments == 0
+
+    def test_partial_stimulus_not_treated_as_disappointment(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.3, 0.5)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.disappointments == 0
+
+    def test_record_experience_resets_disappointments(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        mem.update_expectation((5, 5), StimulusType.FOOD, 0.0, 0.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.disappointments == 2
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        assert entry.disappointments == 0
+        assert entry.strength == 1.0

@@ -12,6 +12,7 @@ class MemoryEntry:
     expected_intensity: float
     reward_value: float
     strength: float = 1.0
+    disappointments: int = 0
 
 
 class MemorySystem:
@@ -27,6 +28,8 @@ class MemorySystem:
         self.cognitive_map: dict[tuple[int, int], list[MemoryEntry]] = {}
         self.edges: dict[tuple[tuple[int, int], tuple[int, int]], int] = {}
         self.visited: dict[tuple[int, int], float] = {}
+        self.cumulative_prediction_error: float = 0.0
+        self.prediction_count: int = 0
 
     def record_experience(
         self,
@@ -39,9 +42,10 @@ class MemorySystem:
             self.cognitive_map[position] = []
         for entry in self.cognitive_map[position]:
             if entry.stimulus_type == stimulus_type:
-                entry.expected_intensity = intensity
-                entry.reward_value = reward
+                # Only refresh strength — let update_expectation handle
+                # gradual learning of intensity/reward via the learning rate.
                 entry.strength = 1.0
+                entry.disappointments = 0
                 return
         self.cognitive_map[position].append(
             MemoryEntry(
@@ -186,6 +190,12 @@ class MemorySystem:
                     queue.append((neighbor, new_path))
         return None
 
+    @property
+    def prediction_accuracy(self) -> float:
+        if self.prediction_count == 0:
+            return 0.0
+        return 1.0 - (self.cumulative_prediction_error / self.prediction_count)
+
     def update_expectation(
         self,
         position: tuple[int, int],
@@ -196,19 +206,35 @@ class MemorySystem:
         entry = self.get_expected(position, stimulus_type)
         if entry is None:
             return
+        pre_error = (
+            abs(actual_intensity - entry.expected_intensity)
+            + abs(actual_reward - entry.reward_value)
+        ) / 2.0
+        self.cumulative_prediction_error += pre_error
+        self.prediction_count += 1
         entry.expected_intensity += self.learning_rate * (
             actual_intensity - entry.expected_intensity
         )
         entry.reward_value += self.learning_rate * (
             actual_reward - entry.reward_value
         )
-        intensity_error = abs(actual_intensity - entry.expected_intensity)
-        reward_error = abs(actual_reward - entry.reward_value)
-        avg_error = (intensity_error + reward_error) / 2.0
-        if avg_error < 0.2:
-            entry.strength = min(1.0, entry.strength + self.learning_rate * 0.5)
+
+        if actual_intensity == 0.0 and actual_reward == 0.0:
+            # Disappointment-driven extinction: exponential strength decay
+            entry.disappointments += 1
+            entry.strength = max(
+                0.0, entry.strength - self.learning_rate * (2 ** entry.disappointments)
+            )
         else:
-            entry.strength = max(0.0, entry.strength - avg_error * self.learning_rate)
+            # Stimulus present — reset disappointments, use normal learning
+            entry.disappointments = 0
+            intensity_error = abs(actual_intensity - entry.expected_intensity)
+            reward_error = abs(actual_reward - entry.reward_value)
+            avg_error = (intensity_error + reward_error) / 2.0
+            if avg_error < 0.2:
+                entry.strength = min(1.0, entry.strength + self.learning_rate * 0.5)
+            else:
+                entry.strength = max(0.0, entry.strength - avg_error * self.learning_rate)
 
     def decay(self) -> None:
         positions_to_clean = []
