@@ -28,8 +28,38 @@ def cmd_serve(args):
 
 
 def cmd_analyze(args):
-    print("Analysis tools not yet implemented.")
-    sys.exit(1)
+    import json
+
+    from some_sim.analysis.plots import (
+        plot_drive_levels,
+        plot_exploration_heatmap,
+        plot_learning_curve,
+        save_plot,
+    )
+
+    with open(args.input) as f:
+        data = json.load(f)
+
+    records = data["records"]
+    plot_type = args.plot or "drives"
+    prefix = args.input.rsplit(".", 1)[0]
+
+    if plot_type == "drives":
+        fig = plot_drive_levels(records)
+        save_plot(fig, f"{prefix}_drives.png")
+        print(f"Saved: {prefix}_drives.png")
+    elif plot_type == "heatmap":
+        fig = plot_exploration_heatmap(records, grid_size=(20, 20))
+        save_plot(fig, f"{prefix}_heatmap.png")
+        print(f"Saved: {prefix}_heatmap.png")
+    elif plot_type == "learning":
+        fig = plot_learning_curve(records)
+        save_plot(fig, f"{prefix}_learning.png")
+        print(f"Saved: {prefix}_learning.png")
+    else:
+        print(f"Unknown plot type: {plot_type}")
+        print("Available: drives, heatmap, learning")
+        sys.exit(1)
 
 
 def main():
