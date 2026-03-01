@@ -60,194 +60,206 @@
 
             <!-- Right column: Config, Params & Tracing -->
             <aside id="sidebar">
-                <div class="panel" id="controls">
-                    <h2>Controls</h2>
-                    <div id="btn-group">
-                        <button id="btn-play">Play</button>
-                        <button id="btn-pause">Pause</button>
-                        <button id="btn-step">Step</button>
-                        <button id="btn-reset">Reset</button>
+                <div class="sidebar-group">
+                    <div class="sidebar-group-label">Controls</div>
+                    <div class="panel" id="controls">
+                        <h2>Controls</h2>
+                        <div id="btn-group">
+                            <button id="btn-play" aria-label="Play simulation">Play</button>
+                            <button id="btn-pause" aria-label="Pause simulation">Pause</button>
+                            <button id="btn-step" aria-label="Step one tick">Step</button>
+                            <button id="btn-reset" aria-label="Reset simulation">Reset</button>
+                        </div>
+                        <div id="speed-control">
+                            <label>Speed: <span id="speed-val">5</span> tps
+                                <input type="range" id="speed-slider" min="1" max="30" value="5">
+                            </label>
+                        </div>
                     </div>
-                    <div id="speed-control">
-                        <label>Speed: <span id="speed-val">5</span> tps
-                            <input type="range" id="speed-slider" min="1" max="30" value="5">
+                    <div class="panel" id="overlays">
+                        <h2>Overlays</h2>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-cogmap" checked>
+                            Cognitive Map
                         </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-perception" checked>
+                            Perception
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-density" checked>
+                            Density Field
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-vte" checked>
+                            VTE Arrows
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-legend" checked>
+                            Legend
+                        </label>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>Cognitive Map</dt>
+                                <dd>Diamond markers at remembered stimulus locations, connected by purple edge lines. Opacity reflects memory strength.</dd>
+                                <dt>Perception</dt>
+                                <dd>Dashed sensory radius circle and lines to detected stimuli, colored by type.</dd>
+                                <dt>Density Field</dt>
+                                <dd>KDE heatmap of reward-weighted experience. Brighter cells have more accumulated value.</dd>
+                                <dt>VTE Arrows</dt>
+                                <dd>Directional arrows showing simulated reward per direction. Purple = decided, magenta = deliberating. Arrow length = relative value.</dd>
+                            </dl>
+                        </details>
                     </div>
                 </div>
-                <div class="panel" id="drives">
-                    <h2>Drives</h2>
-                    <div class="drive-bar">
-                        <label>Hunger</label>
-                        <div class="bar-bg"><div id="bar-hunger" class="bar-fill hunger"></div><div class="threshold-marker"></div></div>
-                        <span id="val-hunger">0.00</span>
-                    </div>
-                    <div class="drive-bar">
-                        <label>Thirst</label>
-                        <div class="bar-bg"><div id="bar-thirst" class="bar-fill thirst"></div><div class="threshold-marker"></div></div>
-                        <span id="val-thirst">0.00</span>
-                    </div>
-                    <div class="drive-bar">
-                        <label>Temperature</label>
-                        <div class="bar-bg"><div id="bar-temperature" class="bar-fill temperature"></div><div class="threshold-marker"></div></div>
-                        <span id="val-temperature">0.00</span>
-                    </div>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Drives</dt>
-                            <dd>Internal motivational states that rise each tick at a fixed rate and bias the agent toward relevant stimuli.</dd>
-                            <dt>Hunger</dt>
-                            <dd>Satisfied by food. The most urgent drive determines which stimulus the agent seeks.</dd>
-                            <dt>Thirst</dt>
-                            <dd>Satisfied by water. Same priority logic as hunger.</dd>
-                            <dt>Temperature</dt>
-                            <dd>Satisfied by heat sources. Rises at a slower default rate.</dd>
-                            <dt>Phototaxis</dt>
-                            <dd>When drives are low, the agent is drawn toward light. High drives suppress this tendency.</dd>
-                        </dl>
-                    </details>
-                </div>
-                <div class="panel" id="overlays">
-                    <h2>Overlays</h2>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-cogmap" checked>
-                        Cognitive Map
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-perception" checked>
-                        Perception
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-density" checked>
-                        Density Field
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-vte" checked>
-                        VTE Arrows
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="toggle-legend" checked>
-                        Legend
-                    </label>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Cognitive Map</dt>
-                            <dd>Diamond markers at remembered stimulus locations, connected by purple edge lines. Opacity reflects memory strength.</dd>
-                            <dt>Perception</dt>
-                            <dd>Dashed sensory radius circle and lines to detected stimuli, colored by type.</dd>
-                            <dt>Density Field</dt>
-                            <dd>KDE heatmap of reward-weighted experience. Brighter cells have more accumulated value.</dd>
-                            <dt>VTE Arrows</dt>
-                            <dd>Directional arrows showing simulated reward per direction. Purple = decided, magenta = deliberating. Arrow length = relative value.</dd>
-                        </dl>
-                    </details>
-                </div>
-                <div class="panel" id="perceptions">
-                    <h2>Perceptions</h2>
-                    <div id="perception-list">
-                        <div class="perception-item" data-stim="food">
-                            <span class="dot" style="background:#4CAF50"></span>
-                            <span class="type-label">food</span>
-                            <span class="intensity" id="perc-food">0%</span>
-                            <span class="distance" id="perc-food-dist">-</span>
+                <div class="sidebar-group">
+                    <div class="sidebar-group-label">Status</div>
+                    <div class="panel" id="drives">
+                        <h2>Drives</h2>
+                        <div class="drive-bar">
+                            <label>Hunger</label>
+                            <div class="bar-bg" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="1" aria-label="Hunger level"><div id="bar-hunger" class="bar-fill hunger"></div><div class="threshold-marker"></div></div>
+                            <span id="val-hunger">0.00</span>
                         </div>
-                        <div class="perception-item" data-stim="water">
-                            <span class="dot" style="background:#2196F3"></span>
-                            <span class="type-label">water</span>
-                            <span class="intensity" id="perc-water">0%</span>
-                            <span class="distance" id="perc-water-dist">-</span>
+                        <div class="drive-bar">
+                            <label>Thirst</label>
+                            <div class="bar-bg" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="1" aria-label="Thirst level"><div id="bar-thirst" class="bar-fill thirst"></div><div class="threshold-marker"></div></div>
+                            <span id="val-thirst">0.00</span>
                         </div>
-                        <div class="perception-item" data-stim="light">
-                            <span class="dot" style="background:#FFEB3B"></span>
-                            <span class="type-label">light</span>
-                            <span class="intensity" id="perc-light">0%</span>
-                            <span class="distance" id="perc-light-dist">-</span>
+                        <div class="drive-bar">
+                            <label>Temperature</label>
+                            <div class="bar-bg" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="1" aria-label="Temperature level"><div id="bar-temperature" class="bar-fill temperature"></div><div class="threshold-marker"></div></div>
+                            <span id="val-temperature">0.00</span>
                         </div>
-                        <div class="perception-item" data-stim="heat">
-                            <span class="dot" style="background:#F44336"></span>
-                            <span class="type-label">heat</span>
-                            <span class="intensity" id="perc-heat">0%</span>
-                            <span class="distance" id="perc-heat-dist">-</span>
-                        </div>
-                        <div class="perception-item" data-stim="obstacle">
-                            <span class="dot" style="background:#424242"></span>
-                            <span class="type-label">obstacle</span>
-                            <span class="intensity" id="perc-obstacle">0%</span>
-                            <span class="distance" id="perc-obstacle-dist">-</span>
-                        </div>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>Drives</dt>
+                                <dd>Internal motivational states that rise each tick at a fixed rate and bias the agent toward relevant stimuli.</dd>
+                                <dt>Hunger</dt>
+                                <dd>Satisfied by food. The most urgent drive determines which stimulus the agent seeks.</dd>
+                                <dt>Thirst</dt>
+                                <dd>Satisfied by water. Same priority logic as hunger.</dd>
+                                <dt>Temperature</dt>
+                                <dd>Satisfied by heat sources. Rises at a slower default rate.</dd>
+                                <dt>Phototaxis</dt>
+                                <dd>When drives are low, the agent is drawn toward light. High drives suppress this tendency.</dd>
+                            </dl>
+                        </details>
                     </div>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Perception</dt>
-                            <dd>All stimulus types are shown. Intensity and distance update when a stimulus is within the agent's sensory radius; otherwise they stay at 0% / -.</dd>
-                            <dt>Intensity %</dt>
-                            <dd>Highest perceived strength for that type. Decays linearly from 100% at the source to 0% at the radius edge.</dd>
-                            <dt>Distance</dt>
-                            <dd>Euclidean distance to the closest detected stimulus of that type, in grid cells.</dd>
-                        </dl>
-                    </details>
-                </div>
-                <div class="panel" id="memory">
-                    <h2>Memory</h2>
-                    <div id="memory-stats">
-                        <p>Locations: <span id="mem-locations">0</span></p>
-                        <p>Edges: <span id="mem-edges">0</span></p>
-                        <p>Visited: <span id="mem-visited">0</span></p>
-                        <p>Avg str: <span id="mem-strength">0.00</span></p>
-                        <p>Density pk: <span id="mem-density-peak">-</span></p>
+                    <div class="panel" id="perceptions">
+                        <h2>Perceptions</h2>
+                        <div id="perception-list">
+                            <div class="perception-header">
+                                <span class="dot-placeholder"></span>
+                                <span class="type-label">Type</span>
+                                <span class="intensity">Intens.</span>
+                                <span class="distance">Dist.</span>
+                            </div>
+                            <div class="perception-item" data-stim="food">
+                                <span class="dot" style="background:#4CAF50"></span>
+                                <span class="type-label">food</span>
+                                <span class="intensity" id="perc-food">0%</span>
+                                <span class="distance" id="perc-food-dist">-</span>
+                            </div>
+                            <div class="perception-item" data-stim="water">
+                                <span class="dot" style="background:#2196F3"></span>
+                                <span class="type-label">water</span>
+                                <span class="intensity" id="perc-water">0%</span>
+                                <span class="distance" id="perc-water-dist">-</span>
+                            </div>
+                            <div class="perception-item" data-stim="light">
+                                <span class="dot" style="background:#FFEB3B"></span>
+                                <span class="type-label">light</span>
+                                <span class="intensity" id="perc-light">0%</span>
+                                <span class="distance" id="perc-light-dist">-</span>
+                            </div>
+                            <div class="perception-item" data-stim="heat">
+                                <span class="dot" style="background:#F44336"></span>
+                                <span class="type-label">heat</span>
+                                <span class="intensity" id="perc-heat">0%</span>
+                                <span class="distance" id="perc-heat-dist">-</span>
+                            </div>
+                            <div class="perception-item" data-stim="obstacle">
+                                <span class="dot" style="background:#424242"></span>
+                                <span class="type-label">obstacle</span>
+                                <span class="intensity" id="perc-obstacle">0%</span>
+                                <span class="distance" id="perc-obstacle-dist">-</span>
+                            </div>
+                        </div>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>Perception</dt>
+                                <dd>All stimulus types are shown. Intensity and distance update when a stimulus is within the agent's sensory radius; otherwise they stay at 0% / -.</dd>
+                                <dt>Intensity %</dt>
+                                <dd>Highest perceived strength for that type. Decays linearly from 100% at the source to 0% at the radius edge.</dd>
+                                <dt>Distance</dt>
+                                <dd>Euclidean distance to the closest detected stimulus of that type, in grid cells.</dd>
+                            </dl>
+                        </details>
                     </div>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Locations</dt>
-                            <dd>Cells in the cognitive map where the agent recorded a stimulus encounter (type, intensity, reward).</dd>
-                            <dt>Edges</dt>
-                            <dd>Directed traversals between adjacent cells. Each step the agent takes adds or increments an edge.</dd>
-                            <dt>Visited</dt>
-                            <dd>Total cells the agent has stepped on. Familiarity decays over time; cells below 0.01 are forgotten.</dd>
-                            <dt>Avg strength</dt>
-                            <dd>Mean memory strength across all cognitive map entries. Strength rises when predictions match reality, decays each tick.</dd>
-                            <dt>Density peak</dt>
-                            <dd>Maximum value in the KDE density field — the hottest spot of reward-weighted experience.</dd>
-                        </dl>
-                    </details>
-                </div>
-                <div class="panel" id="vte-section">
-                    <h2>Deliberation (VTE)</h2>
-                    <div id="vte-status">
-                        <p class="empty-state">No deliberation</p>
+                    <div class="panel" id="memory">
+                        <h2>Memory</h2>
+                        <div id="memory-stats">
+                            <p title="Cells in the cognitive map where a stimulus was recorded">Locations: <span id="mem-locations">0</span></p>
+                            <p title="Directed traversals between adjacent cells">Edges: <span id="mem-edges">0</span></p>
+                            <p title="Total cells the agent has stepped on">Visited: <span id="mem-visited">0</span></p>
+                            <p title="Average edge strength (confidence in learned paths)">Avg strength: <span id="mem-strength">0.00</span></p>
+                            <p title="Maximum value in the KDE density field">Density peak: <span id="mem-density-peak">-</span></p>
+                        </div>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>Locations</dt>
+                                <dd>Cells in the cognitive map where the agent recorded a stimulus encounter (type, intensity, reward).</dd>
+                                <dt>Edges</dt>
+                                <dd>Directed traversals between adjacent cells. Each step the agent takes adds or increments an edge.</dd>
+                                <dt>Visited</dt>
+                                <dd>Total cells the agent has stepped on. Familiarity decays over time; cells below 0.01 are forgotten.</dd>
+                                <dt>Avg strength</dt>
+                                <dd>Mean memory strength across all cognitive map entries. Strength rises when predictions match reality, decays each tick.</dd>
+                                <dt>Density peak</dt>
+                                <dd>Maximum value in the KDE density field — the hottest spot of reward-weighted experience.</dd>
+                            </dl>
+                        </details>
                     </div>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>VTE</dt>
-                            <dd>Vicarious Trial and Error. The agent mentally simulates each direction using its cognitive map, accumulating discounted expected reward over a BFS horizon.</dd>
-                            <dt>Deliberating</dt>
-                            <dd>The top two directional values are within the VTE threshold — the agent is uncertain which way to go.</dd>
-                            <dt>Hesitating</dt>
-                            <dd>During deliberation, the agent sometimes pauses (Direction.STAY) instead of committing.</dd>
-                            <dt>Decided</dt>
-                            <dd>One direction clearly dominates; the agent commits without hesitation.</dd>
-                            <dt>Candidates</dt>
-                            <dd>The four cardinal directions with their simulated reward values. Bar length is relative to the best candidate.</dd>
-                        </dl>
-                    </details>
-                </div>
-                <div class="panel" id="info">
-                    <h2>Agent</h2>
-                    <p>Position: <span id="agent-pos">-</span></p>
-                    <p>Orientation: <span id="agent-orient">-</span></p>
-                    <details class="panel-help">
-                        <summary>?</summary>
-                        <dl>
-                            <dt>Position</dt>
-                            <dd>The agent's current (x, y) cell on the grid.</dd>
-                            <dt>Orientation</dt>
-                            <dd>The direction the agent last moved (N/S/E/W), shown as a heading line on the agent circle.</dd>
-                        </dl>
-                    </details>
+                    <div class="panel" id="vte-section">
+                        <h2>Deliberation (VTE)</h2>
+                        <div id="vte-status">
+                            <p class="empty-state">No deliberation</p>
+                        </div>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>VTE</dt>
+                                <dd>Vicarious Trial and Error. The agent mentally simulates each direction using its cognitive map, accumulating discounted expected reward over a BFS horizon.</dd>
+                                <dt>Deliberating</dt>
+                                <dd>The top two directional values are within the VTE threshold — the agent is uncertain which way to go.</dd>
+                                <dt>Hesitating</dt>
+                                <dd>During deliberation, the agent sometimes pauses (Direction.STAY) instead of committing.</dd>
+                                <dt>Decided</dt>
+                                <dd>One direction clearly dominates; the agent commits without hesitation.</dd>
+                                <dt>Candidates</dt>
+                                <dd>The four cardinal directions with their simulated reward values. Bar length is relative to the best candidate.</dd>
+                            </dl>
+                        </details>
+                    </div>
+                    <div class="panel" id="info">
+                        <h2>Agent</h2>
+                        <p>Position: <span id="agent-pos">-</span></p>
+                        <p>Orientation: <span id="agent-orient">-</span></p>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>Position</dt>
+                                <dd>The agent's current (x, y) cell on the grid.</dd>
+                                <dt>Orientation</dt>
+                                <dd>The direction the agent last moved (N/S/E/W), shown as a heading line on the agent circle.</dd>
+                            </dl>
+                        </details>
+                    </div>
                 </div>
             </aside>
         </main>
