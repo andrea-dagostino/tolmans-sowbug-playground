@@ -1,0 +1,81 @@
+/* style.css — Schematic Sowbug */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+}
+
+#app { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #ddd;
+}
+
+header h1 { font-size: 1.3rem; }
+#tick-counter { font-family: monospace; font-size: 1.1rem; }
+
+main { display: flex; gap: 1.5rem; }
+
+#grid-container {
+    flex-shrink: 0;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+#grid-canvas { display: block; cursor: crosshair; }
+
+aside#dashboard { flex: 1; min-width: 240px; }
+
+aside section {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+aside h2 { font-size: 0.9rem; margin-bottom: 0.5rem; color: #666; text-transform: uppercase; }
+
+.drive-bar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.drive-bar label { width: 80px; font-size: 0.85rem; }
+.bar-bg { flex: 1; height: 14px; background: #eee; border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+.bar-fill.hunger { background: #4CAF50; }
+.bar-fill.thirst { background: #2196F3; }
+.bar-fill.temperature { background: #F44336; }
+.drive-bar span { width: 35px; font-size: 0.8rem; font-family: monospace; text-align: right; }
+
+#info p { font-size: 0.85rem; margin-bottom: 0.2rem; }
+#info span { font-family: monospace; }
+
+#btn-group { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+#btn-group button {
+    padding: 0.4rem 0.8rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+#btn-group button:hover { background: #f0f0f0; }
+
+#speed-control { font-size: 0.85rem; }
+#speed-slider { width: 100%; margin-top: 0.3rem; }
+
+#place-stimulus select {
+    width: 100%;
+    padding: 0.3rem;
+    margin-bottom: 0.3rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+#place-stimulus em { font-size: 0.8rem; color: #999; }

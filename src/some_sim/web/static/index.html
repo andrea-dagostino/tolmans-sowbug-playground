@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schematic Sowbug</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Schematic Sowbug Simulation</h1>
+            <span id="tick-counter">Tick: 0</span>
+        </header>
+        <main>
+            <div id="grid-container">
+                <canvas id="grid-canvas" width="600" height="600"></canvas>
+            </div>
+            <aside id="dashboard">
+                <section id="drives">
+                    <h2>Drives</h2>
+                    <div class="drive-bar">
+                        <label>Hunger</label>
+                        <div class="bar-bg"><div id="bar-hunger" class="bar-fill hunger"></div></div>
+                        <span id="val-hunger">0.00</span>
+                    </div>
+                    <div class="drive-bar">
+                        <label>Thirst</label>
+                        <div class="bar-bg"><div id="bar-thirst" class="bar-fill thirst"></div></div>
+                        <span id="val-thirst">0.00</span>
+                    </div>
+                    <div class="drive-bar">
+                        <label>Temperature</label>
+                        <div class="bar-bg"><div id="bar-temperature" class="bar-fill temperature"></div></div>
+                        <span id="val-temperature">0.00</span>
+                    </div>
+                </section>
+                <section id="info">
+                    <h2>Agent</h2>
+                    <p>Position: <span id="agent-pos">-</span></p>
+                    <p>Orientation: <span id="agent-orient">-</span></p>
+                </section>
+                <section id="controls">
+                    <h2>Controls</h2>
+                    <div id="btn-group">
+                        <button id="btn-play">Play</button>
+                        <button id="btn-pause">Pause</button>
+                        <button id="btn-step">Step</button>
+                        <button id="btn-reset">Reset</button>
+                    </div>
+                    <div id="speed-control">
+                        <label>Speed: <span id="speed-val">5</span> tps</label>
+                        <input type="range" id="speed-slider" min="1" max="30" value="5">
+                    </div>
+                </section>
+                <section id="place-stimulus">
+                    <h2>Place Stimulus</h2>
+                    <select id="stim-type">
+                        <option value="food">Food</option>
+                        <option value="water">Water</option>
+                        <option value="light">Light</option>
+                        <option value="heat">Heat</option>
+                        <option value="obstacle">Obstacle</option>
+                    </select>
+                    <p><em>Click on grid to place</em></p>
+                </section>
+            </aside>
+        </main>
+    </div>
+    <script src="/static/main.js"></script>
+</body>
+</html>
