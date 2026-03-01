@@ -709,6 +709,54 @@ function renderDriveChart() {
     }
 }
 
+function renderLegend() {
+    if (!showLegend) return;
+    const items = [
+        { label: "Food", color: COLORS.food, icon: "\u{1F33F}" },
+        { label: "Water", color: COLORS.water, icon: "\u{1F4A7}" },
+        { label: "Light", color: COLORS.light, icon: "\u2600" },
+        { label: "Heat", color: COLORS.heat, icon: "\u{1F525}" },
+        { label: "Obstacle", color: COLORS.obstacle, icon: "\u25A0" },
+        { label: "Agent", color: COLORS.agent, icon: null },
+    ];
+    const lineH = 16;
+    const legendW = 78;
+    const legendH = items.length * lineH + 8;
+    const lx = canvas.width - legendW - 6;
+    const ly = 6;
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.strokeStyle = "#ccc";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(lx, ly, legendW, legendH, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const iy = ly + 8 + i * lineH + lineH / 2;
+
+        if (item.icon) {
+            ctx.font = "10px sans-serif";
+            ctx.fillText(item.icon, lx + 6, iy);
+        } else {
+            // Agent circle
+            ctx.fillStyle = item.color;
+            ctx.beginPath();
+            ctx.arc(lx + 11, iy, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.fillStyle = "#555";
+        ctx.font = "10px sans-serif";
+        ctx.fillText(item.label, lx + 24, iy);
+    }
+}
+
 // --- Main render ---
 
 function render(state) {
@@ -737,6 +785,7 @@ function render(state) {
     if (showVTE) renderVTE(state);
 
     // Stimuli
+    const STIM_ICONS = { food: "\u{1F33F}", water: "\u{1F4A7}", light: "\u2600", heat: "\u{1F525}", obstacle: "\u25A0" };
     if (state.stimuli) {
         for (const stim of state.stimuli) {
             const [x, y] = stim.position;
@@ -744,6 +793,16 @@ function render(state) {
             ctx.globalAlpha = Math.max(0.3, stim.intensity);
             ctx.fillRect(x * cellSize + 1, y * cellSize + 1, cellSize - 2, cellSize - 2);
             ctx.globalAlpha = 1.0;
+
+            // Icon
+            const icon = STIM_ICONS[stim.type];
+            if (icon) {
+                const iconSize = Math.max(8, cellSize * 0.45);
+                ctx.font = `${iconSize}px sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(icon, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
+            }
         }
     }
 
@@ -772,6 +831,8 @@ function render(state) {
             ctx.stroke();
         }
     }
+
+    renderLegend();
 
     document.getElementById("tick-counter").textContent = `Tick: ${state.tick}`;
 }
@@ -962,6 +1023,10 @@ document.getElementById("toggle-density").onchange = (e) => {
 };
 document.getElementById("toggle-vte").onchange = (e) => {
     showVTE = e.target.checked;
+    if (latestState) render(latestState);
+};
+document.getElementById("toggle-legend").onchange = (e) => {
+    showLegend = e.target.checked;
     if (latestState) render(latestState);
 };
 
