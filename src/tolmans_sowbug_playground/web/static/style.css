@@ -100,6 +100,30 @@ main {
 #btn-regenerate:hover,
 #btn-save-preset:hover { background: #f0f0f0; }
 
+.toolbar-section {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.toolbar-section-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #78909C;
+}
+
+#place-section.editing-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+#place-section.editing-disabled .hint {
+    color: #E65100;
+    font-style: normal;
+}
+
 .toolbar-sep {
     width: 1px;
     height: 18px;

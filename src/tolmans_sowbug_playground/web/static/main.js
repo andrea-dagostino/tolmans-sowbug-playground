@@ -968,8 +968,16 @@ function updateVTESummary(agent) {
 }
 
 // --- Controls ---
-document.getElementById("btn-play").onclick = () => send({ action: "play" });
-document.getElementById("btn-pause").onclick = () => send({ action: "pause" });
+document.getElementById("btn-play").onclick = () => {
+    send({ action: "play" });
+    document.getElementById("place-section").classList.add("editing-disabled");
+    document.getElementById("edit-hint").textContent = "Pause to edit";
+};
+document.getElementById("btn-pause").onclick = () => {
+    send({ action: "pause" });
+    document.getElementById("place-section").classList.remove("editing-disabled");
+    document.getElementById("edit-hint").textContent = "L-click place / R-click remove";
+};
 document.getElementById("btn-step").onclick = () => send({ action: "step" });
 document.getElementById("btn-reset").onclick = () => send({ action: "reset" });
 
