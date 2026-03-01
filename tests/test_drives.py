@@ -34,6 +34,35 @@ class TestDrive:
         d.satisfy(0.5)
         assert d.level == 0.0
 
+    def test_satiety_defaults_to_zero(self):
+        d = Drive(drive_type=DriveType.HUNGER)
+        assert d.satiety == 0.0
+        assert d.satiety_decay_rate == 0.05
+
+    def test_satiety_decays_exponentially_on_update(self):
+        d = Drive(DriveType.HUNGER, level=0.0, rate=0.01, satiety_decay_rate=0.1)
+        d.satiety = 0.8
+        d.update()
+        assert abs(d.satiety - 0.72) < 1e-9  # 0.8 * (1 - 0.1)
+
+    def test_satiety_suppresses_drive_growth(self):
+        d = Drive(DriveType.HUNGER, level=0.0, rate=0.1, satiety_decay_rate=0.0)
+        d.satiety = 0.5
+        d.update()
+        # effective_rate = 0.1 * (1 - 0.5) = 0.05
+        assert abs(d.level - 0.05) < 1e-9
+
+    def test_full_satiety_blocks_drive_growth(self):
+        d = Drive(DriveType.HUNGER, level=0.0, rate=0.1, satiety_decay_rate=0.0)
+        d.satiety = 1.0
+        d.update()
+        assert d.level == 0.0  # no growth at all
+
+    def test_zero_satiety_normal_growth(self):
+        d = Drive(DriveType.HUNGER, level=0.0, rate=0.1)
+        d.update()
+        assert abs(d.level - 0.1) < 1e-9  # no satiety, full rate
+
 
 class TestDriveSystem:
     def test_creation_with_drives(self):

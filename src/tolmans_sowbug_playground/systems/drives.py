@@ -13,12 +13,17 @@ class Drive:
     drive_type: DriveType
     level: float = 0.0
     rate: float = 0.01
+    satiety: float = 0.0
+    satiety_decay_rate: float = 0.05
 
     def update(self) -> None:
-        self.level = min(1.0, self.level + self.rate)
+        self.satiety *= (1.0 - self.satiety_decay_rate)
+        effective_rate = self.rate * (1.0 - self.satiety)
+        self.level = min(1.0, self.level + effective_rate)
 
     def satisfy(self, amount: float) -> None:
         self.level = max(0.0, self.level - amount)
+        self.satiety = min(1.0, self.satiety + amount)
 
 
 class DriveSystem:
