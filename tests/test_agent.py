@@ -133,3 +133,11 @@ class TestAgent:
         state = agent.get_state()
         assert "density_field" in state
         assert state["density_field"] == {}
+
+    def test_get_state_includes_satiety(self):
+        agent = self._make_agent()
+        agent.drive_system.drives[DriveType.HUNGER].satiety = 0.4
+        state = agent.get_state()
+        assert "satiety_levels" in state
+        assert DriveType.HUNGER in state["satiety_levels"]
+        assert state["satiety_levels"][DriveType.HUNGER] == 0.4

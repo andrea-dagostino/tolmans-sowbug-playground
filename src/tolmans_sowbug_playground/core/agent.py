@@ -48,6 +48,7 @@ class Agent(ABC):
             "position": self.position,
             "orientation": self.orientation.name,
             "drive_levels": self.drive_system.get_levels(),
+            "satiety_levels": self.drive_system.get_satiety_levels(),
             "perception_count": len(self.current_perceptions),
             "perception_radius": self.sensor_system.perception_radius,
             "perceptions": [
@@ -85,6 +86,7 @@ class Agent(ABC):
                 for pos, familiarity in self.memory_system.visited.items()
             },
             "density_field": self._compute_density_state(),
+            "prediction_accuracy": round(self.memory_system.prediction_accuracy, 4),
         }
 
     def _compute_density_state(self) -> dict[str, float]:
