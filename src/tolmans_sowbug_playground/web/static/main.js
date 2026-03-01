@@ -455,7 +455,7 @@ function renderChart() {
 
     // Accuracy line
     cCtx.strokeStyle = "#00897B";
-    cCtx.lineWidth = 1.5;
+    cCtx.lineWidth = 2;
     cCtx.beginPath();
     for (let i = 0; i < accuracyHistory.length; i++) {
         const d = accuracyHistory[i];
@@ -604,14 +604,15 @@ function renderDriveChart() {
 
     // Draw a line series
     const series = [
-        { key: "hunger",      color: "#4CAF50", label: "Hunger" },
-        { key: "thirst",      color: "#2196F3", label: "Thirst" },
-        { key: "temperature", color: "#F44336", label: "Temperature" },
+        { key: "hunger",      color: "#4CAF50", label: "Hunger",      dash: [] },
+        { key: "thirst",      color: "#2196F3", label: "Thirst",      dash: [6, 3] },
+        { key: "temperature", color: "#F44336", label: "Temperature", dash: [2, 2] },
     ];
 
     for (const s of series) {
         cCtx.strokeStyle = s.color;
-        cCtx.lineWidth = 1.5;
+        cCtx.lineWidth = 2;
+        cCtx.setLineDash(s.dash);
         cCtx.beginPath();
         for (let i = 0; i < driveHistory.length; i++) {
             const d = driveHistory[i];
@@ -621,20 +622,27 @@ function renderDriveChart() {
             else cCtx.lineTo(x, y);
         }
         cCtx.stroke();
+        cCtx.setLineDash([]);
     }
 
     // Legend
     const legendY = pad.top + 2;
     let legendX = pad.left + 4;
-    cCtx.font = "9px sans-serif";
+    cCtx.font = "10px sans-serif";
     cCtx.textAlign = "left";
     cCtx.textBaseline = "top";
     for (const s of series) {
-        cCtx.fillStyle = s.color;
-        cCtx.fillRect(legendX, legendY, 10, 3);
-        cCtx.fillStyle = "#666";
-        cCtx.fillText(s.label, legendX + 13, legendY - 2);
-        legendX += cCtx.measureText(s.label).width + 22;
+        cCtx.strokeStyle = s.color;
+        cCtx.lineWidth = 2;
+        cCtx.setLineDash(s.dash);
+        cCtx.beginPath();
+        cCtx.moveTo(legendX, legendY + 2);
+        cCtx.lineTo(legendX + 14, legendY + 2);
+        cCtx.stroke();
+        cCtx.setLineDash([]);
+        cCtx.fillStyle = "#555";
+        cCtx.fillText(s.label, legendX + 17, legendY - 1);
+        legendX += cCtx.measureText(s.label).width + 26;
     }
 
     // Event annotations
@@ -815,6 +823,17 @@ function render(state) {
             const cx = x * cellSize + cellSize / 2;
             const cy = y * cellSize + cellSize / 2;
             const r = cellSize / 2.5;
+
+            // Glow ring
+            const pulse = 0.08 + 0.07 * Math.sin(Date.now() / 600);
+            const glowR = r * 1.5;
+            const gradient = ctx.createRadialGradient(cx, cy, r, cx, cy, glowR);
+            gradient.addColorStop(0, `rgba(255, 152, 0, ${pulse})`);
+            gradient.addColorStop(1, "rgba(255, 152, 0, 0)");
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+            ctx.fill();
 
             ctx.fillStyle = COLORS.agent;
             ctx.beginPath();
