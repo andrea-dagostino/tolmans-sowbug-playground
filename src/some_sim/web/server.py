@@ -121,6 +121,12 @@ async def websocket_endpoint(ws: WebSocket):
                                 radius=data.get("radius", 5.0),
                             )
                         )
+                        if not _running:
+                            await ws.send_text(
+                                json.dumps(
+                                    _make_json_safe(_simulation.get_state())
+                                )
+                            )
                 elif action == "remove_stimulus":
                     if _simulation:
                         pos = tuple(data["position"])
@@ -174,6 +180,29 @@ async def websocket_endpoint(ws: WebSocket):
                                     _make_json_safe(_simulation.get_state())
                                 )
                             )
+                elif action == "save_preset":
+                    preset_name = data.get("name", "").strip()
+                    if preset_name and _simulation and _config:
+                        stimuli_list = []
+                        for s in _simulation.environment.stimuli:
+                            stimuli_list.append({
+                                "type": s.stimulus_type.value,
+                                "position": s.position,
+                                "intensity": s.intensity,
+                                "radius": s.radius,
+                            })
+                        PRESETS[preset_name] = {
+                            "grid_width": _config.grid_width,
+                            "grid_height": _config.grid_height,
+                            "agent_position": _config.agent.position,
+                            "stimuli": stimuli_list,
+                        }
+                        await ws.send_text(
+                            json.dumps({
+                                "preset_saved": preset_name,
+                                "presets": list(PRESETS.keys()),
+                            })
+                        )
             except asyncio.TimeoutError:
                 pass
 
