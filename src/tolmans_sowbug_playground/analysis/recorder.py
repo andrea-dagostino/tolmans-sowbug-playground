@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 from enum import Enum
 
 from tolmans_sowbug_playground.core.agent import Agent
@@ -47,6 +48,9 @@ class Recorder:
         )
 
     def save_json(self, path: str) -> None:
+        dirn = os.path.dirname(path)
+        if dirn:
+            os.makedirs(dirn, exist_ok=True)
         data = {
             "run_id": self.run_id,
             "records": self.records,
@@ -57,6 +61,9 @@ class Recorder:
     def save_csv(self, path: str) -> None:
         if not self.records:
             return
+        dirn = os.path.dirname(path)
+        if dirn:
+            os.makedirs(dirn, exist_ok=True)
         with open(path, "w", newline="") as f:
             writer = csv.DictWriter(
                 f,

@@ -7,3 +7,6 @@ build/
 output_*.json
 output_*.csv
 .worktrees/
+results/
+.pytest_cache/
+.claude/
