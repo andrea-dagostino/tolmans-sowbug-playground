@@ -8,10 +8,51 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from some_sim.analysis.recorder import _make_json_safe
-from some_sim.core.config import SimulationConfig, build_simulation
+from some_sim.core.config import SimulationConfig, StimulusConfig, build_simulation
 from some_sim.core.simulation import Simulation
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Environment presets
+PRESETS: dict[str, dict] = {
+    "Empty": {
+        "grid_width": 20,
+        "grid_height": 20,
+        "agent_position": (10, 10),
+        "stimuli": [],
+    },
+    "Basic Foraging": {
+        "grid_width": 25,
+        "grid_height": 25,
+        "agent_position": (12, 12),
+        "stimuli": [
+            {"type": "food", "position": (5, 5)},
+            {"type": "food", "position": (20, 8)},
+            {"type": "food", "position": (10, 20)},
+            {"type": "water", "position": (18, 18)},
+            {"type": "water", "position": (3, 15)},
+        ],
+    },
+    "Choice Point": {
+        "grid_width": 20,
+        "grid_height": 20,
+        "agent_position": (10, 10),
+        "stimuli": [
+            {"type": "food", "position": (3, 10)},
+            {"type": "food", "position": (17, 10)},
+        ],
+    },
+    "Light + Drives": {
+        "grid_width": 20,
+        "grid_height": 20,
+        "agent_position": (10, 10),
+        "stimuli": [
+            {"type": "light", "position": (3, 3)},
+            {"type": "food", "position": (17, 17)},
+            {"type": "water", "position": (17, 3)},
+        ],
+    },
+}
 
 app = FastAPI(title="Schematic Sowbug")
 
@@ -80,6 +121,59 @@ async def websocket_endpoint(ws: WebSocket):
                                 radius=data.get("radius", 5.0),
                             )
                         )
+                elif action == "remove_stimulus":
+                    if _simulation:
+                        pos = tuple(data["position"])
+                        matches = _simulation.environment.get_stimuli_at(pos)
+                        for s in matches:
+                            _simulation.environment.remove_stimulus(s)
+                        if matches and not _running:
+                            await ws.send_text(
+                                json.dumps(
+                                    _make_json_safe(_simulation.get_state())
+                                )
+                            )
+                elif action == "resize":
+                    width = max(5, min(100, data.get("width", 20)))
+                    height = max(5, min(100, data.get("height", 20)))
+                    if _config is not None:
+                        _config.grid_width = width
+                        _config.grid_height = height
+                        ax = min(_config.agent.position[0], width - 1)
+                        ay = min(_config.agent.position[1], height - 1)
+                        _config.agent.position = (ax, ay)
+                    _running = False
+                    _init_simulation()
+                    if _simulation:
+                        await ws.send_text(
+                            json.dumps(
+                                _make_json_safe(_simulation.get_state())
+                            )
+                        )
+                elif action == "load_preset":
+                    preset_name = data.get("preset", "")
+                    preset = PRESETS.get(preset_name)
+                    if preset and _config is not None:
+                        _config.grid_width = preset["grid_width"]
+                        _config.grid_height = preset["grid_height"]
+                        _config.agent.position = preset["agent_position"]
+                        _config.stimuli = [
+                            StimulusConfig(
+                                stimulus_type=s["type"],
+                                position=tuple(s["position"]),
+                                intensity=s.get("intensity", 1.0),
+                                radius=s.get("radius", 5.0),
+                            )
+                            for s in preset["stimuli"]
+                        ]
+                        _running = False
+                        _init_simulation()
+                        if _simulation:
+                            await ws.send_text(
+                                json.dumps(
+                                    _make_json_safe(_simulation.get_state())
+                                )
+                            )
             except asyncio.TimeoutError:
                 pass
 

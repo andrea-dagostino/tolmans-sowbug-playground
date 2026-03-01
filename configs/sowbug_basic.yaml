@@ -61,3 +61,5 @@ agent:
   learning_rate: 0.1
   decay_rate: 0.01
   kernel_bandwidth: 2.0
+  vte_horizon: 5
+  vte_threshold: 0.8

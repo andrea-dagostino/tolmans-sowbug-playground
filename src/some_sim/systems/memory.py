@@ -126,6 +126,45 @@ class MemorySystem:
     def record_visit(self, position: tuple[int, int]) -> None:
         self.visited[position] = 1.0
 
+    def estimate_value(
+        self,
+        position: tuple[int, int],
+        stimulus_type: StimulusType,
+        horizon: int = 5,
+        discount: float = 0.9,
+    ) -> float:
+        """Mentally simulate BFS from position, accumulating discounted expected reward.
+
+        This is the core primitive for vicarious trial and error (VTE).
+        The agent 'imagines' walking through its cognitive map from a given
+        position, summing up temporally-discounted expected rewards weighted
+        by memory strength.
+        """
+        if position not in self.visited:
+            return 0.0
+
+        total = 0.0
+        queue = deque([(position, 0)])
+        seen = {position}
+
+        while queue:
+            current, depth = queue.popleft()
+            if depth > horizon:
+                continue
+
+            for entry in self.cognitive_map.get(current, []):
+                if entry.stimulus_type == stimulus_type:
+                    total += (discount ** depth) * entry.reward_value * entry.strength
+
+            if depth < horizon:
+                for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    neighbor = (current[0] + dx, current[1] + dy)
+                    if neighbor in self.visited and neighbor not in seen:
+                        seen.add(neighbor)
+                        queue.append((neighbor, depth + 1))
+
+        return total
+
     def find_path(
         self, start: tuple[int, int], goal: tuple[int, int]
     ) -> list[tuple[int, int]] | None:

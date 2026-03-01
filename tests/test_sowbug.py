@@ -37,12 +37,13 @@ class TestSowbugDecisionMaking:
         # Bug should have moved closer to food (north, since food is at y=2)
         assert bug.position[1] <= 5
 
-    def test_avoids_light(self):
+    def test_attracted_to_light_when_idle(self):
+        """Positive phototaxis: sowbug moves toward light when no drives are urgent."""
         random.seed(0)
         bug = Sowbug(position=(5, 5))
-        bug.drive_system.drives[DriveType.HUNGER].level = 0.1
-        bug.drive_system.drives[DriveType.THIRST].level = 0.1
-        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.1
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.0
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
 
         env = Environment(width=20, height=20)
         light = Stimulus(StimulusType.LIGHT, (5, 4), intensity=1.0, radius=5.0)
@@ -51,7 +52,29 @@ class TestSowbugDecisionMaking:
         bug.perceive(env)
         direction = bug.decide()
         bug.act(direction, env)
-        # Should not move north (toward the light)
+        # Should move north (toward the light)
+        assert bug.position[1] <= 5
+
+    def test_drives_override_phototaxis(self):
+        """High drives suppress phototaxis — agent follows food, not light."""
+        random.seed(42)
+        bug = Sowbug(position=(5, 5))
+        bug.drive_system.drives[DriveType.HUNGER].level = 1.0
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        env = Environment(width=20, height=20)
+        # Light to the north
+        light = Stimulus(StimulusType.LIGHT, (5, 2), intensity=1.0, radius=5.0)
+        env.add_stimulus(light)
+        # Food to the south
+        food = Stimulus(StimulusType.FOOD, (5, 8), intensity=1.0, radius=8.0)
+        env.add_stimulus(food)
+
+        bug.perceive(env)
+        direction = bug.decide()
+        bug.act(direction, env)
+        # Should move south toward food, not north toward light
         assert bug.position[1] >= 5
 
     def test_explores_when_no_memory(self):
@@ -175,6 +198,140 @@ class TestSowbugKDE:
         env = Environment(width=15, height=12)
         bug.perceive(env)
         assert bug._grid_size == (15, 12)
+
+
+class TestSowbugVTE:
+    def test_vte_params_accepted(self):
+        bug = Sowbug(position=(5, 5), vte_horizon=3, vte_threshold=0.9)
+        assert bug._vte_horizon == 3
+        assert bug._vte_threshold == 0.9
+
+    def test_vte_state_exported(self):
+        bug = Sowbug(position=(5, 5))
+        state = bug.get_state()
+        assert "vte" in state
+        assert "is_deliberating" in state["vte"]
+        assert "candidates" in state["vte"]
+        assert "chosen" in state["vte"]
+        assert "hesitated" in state["vte"]
+
+    def test_vte_triggers_with_weak_memories(self):
+        """VTE should activate when memories exist but are weak."""
+        bug = Sowbug(position=(5, 5), vte_threshold=0.8)
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Create weak food memories in two directions (similar values)
+        bug.memory_system.record_visit((5, 5))
+        bug.memory_system.record_visit((6, 5))
+        bug.memory_system.record_visit((5, 4))
+        bug.memory_system.record_experience(
+            (6, 5), StimulusType.FOOD, intensity=0.5, reward=0.5
+        )
+        bug.memory_system.record_experience(
+            (5, 4), StimulusType.FOOD, intensity=0.5, reward=0.5
+        )
+        # Weaken them below automaticity threshold
+        for entries in bug.memory_system.cognitive_map.values():
+            for entry in entries:
+                entry.strength = 0.5
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        random.seed(99)  # avoid hesitation for this test
+        bug.decide()
+
+        # Should have populated VTE candidates
+        assert len(bug._vte_candidates) == 4
+
+    def test_vte_skipped_with_strong_memories(self):
+        """VTE should not activate when memories are well-learned."""
+        bug = Sowbug(position=(5, 5))
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Strong memory of food
+        bug.memory_system.record_experience(
+            (5, 2), StimulusType.FOOD, intensity=1.0, reward=1.0
+        )
+        # strength defaults to 1.0 which is above automaticity threshold
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        bug.decide()
+
+        # Should NOT be deliberating (automatic navigation)
+        assert bug._is_deliberating is False
+        assert len(bug._vte_candidates) == 0
+
+    def test_vte_skipped_with_no_memories(self):
+        """VTE should not activate when there are no memories (pure exploration)."""
+        bug = Sowbug(position=(5, 5))
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        random.seed(42)
+        bug.decide()
+
+        # No memories means avg_strength == 0, so explore, not VTE
+        assert bug._is_deliberating is False
+        assert len(bug._vte_candidates) == 0
+
+    def test_vte_hesitation_produces_stay(self):
+        """When deliberating with close options, agent sometimes stays in place."""
+        bug = Sowbug(position=(5, 5), vte_threshold=0.5)
+        bug._vte_hesitation_rate = 1.0  # force hesitation
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Create equal food memories in two directions
+        bug.memory_system.record_visit((5, 5))
+        bug.memory_system.record_visit((6, 5))
+        bug.memory_system.record_visit((5, 4))
+        bug.memory_system.record_experience(
+            (6, 5), StimulusType.FOOD, intensity=0.8, reward=0.6
+        )
+        bug.memory_system.record_experience(
+            (5, 4), StimulusType.FOOD, intensity=0.8, reward=0.6
+        )
+        for entries in bug.memory_system.cognitive_map.values():
+            for entry in entries:
+                entry.strength = 0.5
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        from some_sim.systems.motor import Direction
+        direction = bug.decide()
+        assert direction == Direction.STAY
+        assert bug._vte_hesitated is True
+
+    def test_vte_picks_higher_value_direction(self):
+        """VTE should choose the direction with higher simulated reward."""
+        bug = Sowbug(position=(5, 5), vte_threshold=0.99)
+        bug._vte_hesitation_rate = 0.0  # never hesitate
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Strong food east, nothing elsewhere
+        bug.memory_system.record_visit((5, 5))
+        bug.memory_system.record_visit((6, 5))
+        bug.memory_system.record_experience(
+            (6, 5), StimulusType.FOOD, intensity=1.0, reward=1.0
+        )
+        # Weaken below automaticity
+        bug.memory_system.cognitive_map[(6, 5)][0].strength = 0.5
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        direction = bug.decide()
+        # East has food, should be chosen (after aversion check)
+        from some_sim.systems.motor import Direction
+        assert direction == Direction.EAST
 
 
 class TestSowbugDriveMapping:

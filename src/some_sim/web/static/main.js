@@ -2,8 +2,10 @@
 const canvas = document.getElementById("grid-canvas");
 const ctx = canvas.getContext("2d");
 
-const GRID_SIZE = 20;
-const CELL_SIZE = canvas.width / GRID_SIZE;
+const MAX_CANVAS_PX = 600;
+let gridWidth = 20;
+let gridHeight = 20;
+let cellSize = MAX_CANVAS_PX / 20;
 
 const COLORS = {
     food: "#4CAF50",
@@ -24,6 +26,15 @@ let latestState = null;
 let showCognitiveMap = true;
 let showPerception = true;
 let showDensityField = true;
+let showVTE = true;
+
+function updateCanvasSize(w, h) {
+    gridWidth = w;
+    gridHeight = h;
+    cellSize = Math.floor(Math.min(MAX_CANVAS_PX / gridWidth, MAX_CANVAS_PX / gridHeight));
+    canvas.width = cellSize * gridWidth;
+    canvas.height = cellSize * gridHeight;
+}
 
 function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -31,6 +42,13 @@ function connectWebSocket() {
 
     ws.onmessage = (event) => {
         latestState = JSON.parse(event.data);
+        if (latestState.grid_width && latestState.grid_height) {
+            if (latestState.grid_width !== gridWidth || latestState.grid_height !== gridHeight) {
+                updateCanvasSize(latestState.grid_width, latestState.grid_height);
+                document.getElementById("grid-width").value = gridWidth;
+                document.getElementById("grid-height").value = gridHeight;
+            }
+        }
         render(latestState);
         updateDashboard(latestState);
     };
@@ -64,7 +82,7 @@ function renderDensityField(state) {
         const [gx, gy] = key.split(",").map(Number);
         ctx.globalAlpha = Math.min(density * 0.45, 0.45);
         ctx.fillStyle = densityColor(density);
-        ctx.fillRect(gx * CELL_SIZE, gy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        ctx.fillRect(gx * cellSize, gy * cellSize, cellSize, cellSize);
     }
     ctx.globalAlpha = 1.0;
 }
@@ -79,10 +97,10 @@ function renderCognitiveMap(state) {
         for (const edge of agent.cognitive_map_edges) {
             const [fx, fy] = edge.from;
             const [tx, ty] = edge.to;
-            const fromCx = fx * CELL_SIZE + CELL_SIZE / 2;
-            const fromCy = fy * CELL_SIZE + CELL_SIZE / 2;
-            const toCx = tx * CELL_SIZE + CELL_SIZE / 2;
-            const toCy = ty * CELL_SIZE + CELL_SIZE / 2;
+            const fromCx = fx * cellSize + cellSize / 2;
+            const fromCy = fy * cellSize + cellSize / 2;
+            const toCx = tx * cellSize + cellSize / 2;
+            const toCy = ty * cellSize + cellSize / 2;
             const width = Math.min(1 + edge.count * 0.5, 5);
             ctx.strokeStyle = COLORS.cogmapEdge;
             ctx.globalAlpha = 0.25;
@@ -101,9 +119,9 @@ function renderCognitiveMap(state) {
         for (const [key, familiarity] of Object.entries(agent.visited_cells)) {
             if (cogKeys.has(key)) continue;
             const [gx, gy] = key.split(",").map(Number);
-            const cx = gx * CELL_SIZE + CELL_SIZE / 2;
-            const cy = gy * CELL_SIZE + CELL_SIZE / 2;
-            const r = CELL_SIZE / 5;
+            const cx = gx * cellSize + cellSize / 2;
+            const cy = gy * cellSize + cellSize / 2;
+            const r = cellSize / 5;
             ctx.globalAlpha = Math.max(0.1, familiarity * 0.5);
             ctx.fillStyle = COLORS.visited;
             ctx.beginPath();
@@ -117,11 +135,10 @@ function renderCognitiveMap(state) {
     if (agent.cognitive_map) {
         for (const [key, entries] of Object.entries(agent.cognitive_map)) {
             const [gx, gy] = key.split(",").map(Number);
-            const cx = gx * CELL_SIZE + CELL_SIZE / 2;
-            const cy = gy * CELL_SIZE + CELL_SIZE / 2;
-            const halfSize = CELL_SIZE / 3;
+            const cx = gx * cellSize + cellSize / 2;
+            const cy = gy * cellSize + cellSize / 2;
+            const halfSize = cellSize / 3;
 
-            // Use the strongest entry's type for color, and max strength for opacity
             let maxStrength = 0;
             let dominantType = "food";
             for (const entry of entries) {
@@ -135,7 +152,6 @@ function renderCognitiveMap(state) {
             ctx.globalAlpha = Math.max(0.15, maxStrength * 0.7);
             ctx.fillStyle = color;
 
-            // Draw diamond
             ctx.beginPath();
             ctx.moveTo(cx, cy - halfSize);
             ctx.lineTo(cx + halfSize, cy);
@@ -144,7 +160,6 @@ function renderCognitiveMap(state) {
             ctx.closePath();
             ctx.fill();
 
-            // Dashed outline
             ctx.setLineDash([3, 3]);
             ctx.strokeStyle = color;
             ctx.lineWidth = 1;
@@ -162,18 +177,16 @@ function renderPerceptionRadius(state) {
     if (!radius) return;
 
     const [ax, ay] = agent.position;
-    const cx = ax * CELL_SIZE + CELL_SIZE / 2;
-    const cy = ay * CELL_SIZE + CELL_SIZE / 2;
-    const pixelRadius = radius * CELL_SIZE;
+    const cx = ax * cellSize + cellSize / 2;
+    const cy = ay * cellSize + cellSize / 2;
+    const pixelRadius = radius * cellSize;
 
-    // Faint filled circle
     ctx.globalAlpha = 0.05;
     ctx.fillStyle = COLORS.perceptionRadius;
     ctx.beginPath();
     ctx.arc(cx, cy, pixelRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Dashed outline
     ctx.globalAlpha = 0.3;
     ctx.strokeStyle = COLORS.perceptionRadius;
     ctx.lineWidth = 1;
@@ -191,13 +204,13 @@ function renderPerceptionLines(state) {
     if (!agent.perceptions) return;
 
     const [ax, ay] = agent.position;
-    const agentCx = ax * CELL_SIZE + CELL_SIZE / 2;
-    const agentCy = ay * CELL_SIZE + CELL_SIZE / 2;
+    const agentCx = ax * cellSize + cellSize / 2;
+    const agentCy = ay * cellSize + cellSize / 2;
 
     for (const p of agent.perceptions) {
         const [sx, sy] = p.stimulus_position;
-        const stimCx = sx * CELL_SIZE + CELL_SIZE / 2;
-        const stimCy = sy * CELL_SIZE + CELL_SIZE / 2;
+        const stimCx = sx * cellSize + cellSize / 2;
+        const stimCy = sy * cellSize + cellSize / 2;
         const color = COLORS[p.stimulus_type] || "#999";
 
         ctx.globalAlpha = Math.max(0.2, p.perceived_intensity * 0.8);
@@ -213,71 +226,120 @@ function renderPerceptionLines(state) {
     ctx.globalAlpha = 1.0;
 }
 
+function renderVTE(state) {
+    if (!state.agents || state.agents.length === 0) return;
+    const agent = state.agents[0];
+    const vte = agent.vte;
+    if (!vte || !vte.candidates || vte.candidates.length === 0) return;
+
+    const [ax, ay] = agent.position;
+    const cx = ax * cellSize + cellSize / 2;
+    const cy = ay * cellSize + cellSize / 2;
+
+    const maxVal = Math.max(...vte.candidates.map(c => c.value), 0.001);
+
+    const dirDeltas = { NORTH: [0, -1], SOUTH: [0, 1], EAST: [1, 0], WEST: [-1, 0] };
+    for (const candidate of vte.candidates) {
+        const delta = dirDeltas[candidate.direction];
+        if (!delta || candidate.value <= 0) continue;
+
+        const norm = candidate.value / maxVal;
+        const arrowLen = cellSize * (0.4 + norm * 0.6);
+        const endX = cx + delta[0] * arrowLen;
+        const endY = cy + delta[1] * arrowLen;
+
+        ctx.globalAlpha = 0.3 + norm * 0.5;
+        ctx.strokeStyle = vte.is_deliberating ? "#E040FB" : "#7C4DFF";
+        ctx.lineWidth = 1.5 + norm * 2.5;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        const headLen = 4 + norm * 4;
+        const angle = Math.atan2(delta[1], delta[0]);
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(
+            endX - headLen * Math.cos(angle - Math.PI / 6),
+            endY - headLen * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(
+            endX - headLen * Math.cos(angle + Math.PI / 6),
+            endY - headLen * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+
+    if (vte.hesitated) {
+        const pulse = 0.4 + 0.3 * Math.sin(Date.now() / 150);
+        ctx.globalAlpha = pulse;
+        ctx.strokeStyle = "#E040FB";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, cellSize / 2 + 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1.0;
+    }
+}
+
 // --- Main render ---
 
 function render(state) {
     ctx.fillStyle = COLORS.background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Grid lines
+    // Grid lines
     ctx.strokeStyle = COLORS.gridLine;
     ctx.lineWidth = 0.5;
-    for (let i = 0; i <= GRID_SIZE; i++) {
+    for (let i = 0; i <= gridWidth; i++) {
         ctx.beginPath();
-        ctx.moveTo(i * CELL_SIZE, 0);
-        ctx.lineTo(i * CELL_SIZE, canvas.height);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, i * CELL_SIZE);
-        ctx.lineTo(canvas.width, i * CELL_SIZE);
+        ctx.moveTo(i * cellSize, 0);
+        ctx.lineTo(i * cellSize, canvas.height);
         ctx.stroke();
     }
-
-    // 1.5. Density field heatmap
-    if (showDensityField) {
-        renderDensityField(state);
+    for (let i = 0; i <= gridHeight; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * cellSize);
+        ctx.lineTo(canvas.width, i * cellSize);
+        ctx.stroke();
     }
 
-    // 2. Cognitive map (edges + nodes)
-    if (showCognitiveMap) {
-        renderCognitiveMap(state);
-    }
+    if (showDensityField) renderDensityField(state);
+    if (showCognitiveMap) renderCognitiveMap(state);
+    if (showPerception) renderPerceptionRadius(state);
+    if (showVTE) renderVTE(state);
 
-    // 3. Perception radius
-    if (showPerception) {
-        renderPerceptionRadius(state);
-    }
-
-    // 4. Stimuli
+    // Stimuli
     if (state.stimuli) {
         for (const stim of state.stimuli) {
             const [x, y] = stim.position;
             ctx.fillStyle = COLORS[stim.type] || "#999";
             ctx.globalAlpha = Math.max(0.3, stim.intensity);
-            ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+            ctx.fillRect(x * cellSize + 1, y * cellSize + 1, cellSize - 2, cellSize - 2);
             ctx.globalAlpha = 1.0;
         }
     }
 
-    // 5. Perception lines
-    if (showPerception) {
-        renderPerceptionLines(state);
-    }
+    if (showPerception) renderPerceptionLines(state);
 
-    // 6. Agents
+    // Agents
     if (state.agents) {
         for (const agent of state.agents) {
             const [x, y] = agent.position;
-            const cx = x * CELL_SIZE + CELL_SIZE / 2;
-            const cy = y * CELL_SIZE + CELL_SIZE / 2;
-            const r = CELL_SIZE / 2.5;
+            const cx = x * cellSize + cellSize / 2;
+            const cy = y * cellSize + cellSize / 2;
+            const r = cellSize / 2.5;
 
             ctx.fillStyle = COLORS.agent;
             ctx.beginPath();
             ctx.arc(cx, cy, r, 0, Math.PI * 2);
             ctx.fill();
 
-            // Orientation indicator
             const orientMap = { NORTH: [0, -1], SOUTH: [0, 1], EAST: [1, 0], WEST: [-1, 0] };
             const dir = orientMap[agent.orientation] || [0, 0];
             ctx.strokeStyle = "#BF360C";
@@ -289,7 +351,6 @@ function render(state) {
         }
     }
 
-    // Tick counter
     document.getElementById("tick-counter").textContent = `Tick: ${state.tick}`;
 }
 
@@ -355,7 +416,7 @@ function updateDashboard(state) {
     const agent = state.agents[0];
     const drives = agent.drive_levels || {};
 
-    for (const [name, key] of [["hunger", "hunger"], ["thirst", "thirst"], ["temperature", "temperature"]]) {
+    for (const [name] of [["hunger"], ["thirst"], ["temperature"]]) {
         let val = 0;
         for (const [k, v] of Object.entries(drives)) {
             if (k.toLowerCase().includes(name)) {
@@ -375,6 +436,37 @@ function updateDashboard(state) {
 
     updatePerceptionList(agent);
     updateMemorySummary(agent);
+    updateVTESummary(agent);
+}
+
+function updateVTESummary(agent) {
+    const vte = agent.vte;
+    const container = document.getElementById("vte-status");
+    if (!container) return;
+
+    if (!vte || !vte.candidates || vte.candidates.length === 0) {
+        container.innerHTML = '<p class="empty-state">No deliberation</p>';
+        return;
+    }
+
+    const status = vte.hesitated ? "Hesitating" :
+                   vte.is_deliberating ? "Deliberating" : "Decided";
+    const statusClass = vte.hesitated ? "vte-hesitating" :
+                        vte.is_deliberating ? "vte-deliberating" : "vte-decided";
+
+    const candidateRows = vte.candidates.map(c => {
+        const pct = vte.candidates[0].value > 0
+            ? (c.value / vte.candidates[0].value * 100).toFixed(0)
+            : "0";
+        const chosen = c.direction === vte.chosen ? " chosen" : "";
+        return `<div class="vte-candidate${chosen}">
+            <span class="dir-label">${c.direction}</span>
+            <div class="bar-bg"><div class="bar-fill vte-bar" style="width:${pct}%"></div></div>
+            <span class="vte-val">${c.value.toFixed(3)}</span>
+        </div>`;
+    }).join("");
+
+    container.innerHTML = `<div class="vte-header ${statusClass}">${status}</div>${candidateRows}`;
 }
 
 // --- Controls ---
@@ -390,6 +482,26 @@ speedSlider.oninput = () => {
     send({ action: "speed", value: parseInt(speedSlider.value) });
 };
 
+// Preset selector
+const presetSelect = document.getElementById("preset-select");
+presetSelect.onchange = () => {
+    if (presetSelect.value) {
+        send({ action: "load_preset", preset: presetSelect.value });
+    }
+};
+
+// Grid resize
+document.getElementById("btn-regenerate").onclick = () => {
+    const w = parseInt(document.getElementById("grid-width").value) || 20;
+    const h = parseInt(document.getElementById("grid-height").value) || 20;
+    presetSelect.value = "";
+    send({ action: "resize", width: w, height: h });
+};
+
+// Reset preset dropdown on manual width/height changes
+document.getElementById("grid-width").oninput = () => { presetSelect.value = ""; };
+document.getElementById("grid-height").oninput = () => { presetSelect.value = ""; };
+
 // Overlay toggles
 document.getElementById("toggle-cogmap").onchange = (e) => {
     showCognitiveMap = e.target.checked;
@@ -403,12 +515,16 @@ document.getElementById("toggle-density").onchange = (e) => {
     showDensityField = e.target.checked;
     if (latestState) render(latestState);
 };
+document.getElementById("toggle-vte").onchange = (e) => {
+    showVTE = e.target.checked;
+    if (latestState) render(latestState);
+};
 
-// Click to place stimulus
+// Left-click to place stimulus
 canvas.onclick = (e) => {
     const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
-    const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+    const x = Math.floor((e.clientX - rect.left) / (rect.width / gridWidth));
+    const y = Math.floor((e.clientY - rect.top) / (rect.height / gridHeight));
     const stimType = document.getElementById("stim-type").value;
     send({
         action: "add_stimulus",
@@ -417,6 +533,15 @@ canvas.onclick = (e) => {
         intensity: 1.0,
         radius: 5.0,
     });
+};
+
+// Right-click to remove stimulus
+canvas.oncontextmenu = (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / (rect.width / gridWidth));
+    const y = Math.floor((e.clientY - rect.top) / (rect.height / gridHeight));
+    send({ action: "remove_stimulus", position: [x, y] });
 };
 
 // Start

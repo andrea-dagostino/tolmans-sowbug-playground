@@ -41,6 +41,8 @@ class Simulation:
     def get_state(self) -> dict:
         return {
             "tick": self.tick_count,
+            "grid_width": self.environment.width,
+            "grid_height": self.environment.height,
             "agents": [agent.get_state() for agent in self.agents],
             "stimuli": [
                 {

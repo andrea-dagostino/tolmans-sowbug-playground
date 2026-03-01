@@ -191,6 +191,79 @@ class TestPathfinding:
         assert mem.find_path((0, 0), (4, 0)) is None
 
 
+class TestEstimateValue:
+    def test_returns_zero_for_unvisited_position(self):
+        mem = MemorySystem()
+        assert mem.estimate_value((5, 5), StimulusType.FOOD) == 0.0
+
+    def test_returns_reward_at_visited_position_with_memory(self):
+        mem = MemorySystem()
+        mem.record_visit((5, 5))
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        val = mem.estimate_value((5, 5), StimulusType.FOOD)
+        assert val == 1.0  # reward * strength = 1.0 * 1.0, discount^0 = 1.0
+
+    def test_discounts_distant_memories(self):
+        mem = MemorySystem()
+        for x in range(4):
+            mem.record_visit((x, 0))
+        mem.record_experience((3, 0), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        val = mem.estimate_value((0, 0), StimulusType.FOOD, discount=0.9)
+        expected = 0.9 ** 3 * 1.0  # 3 steps away
+        assert abs(val - expected) < 1e-9
+
+    def test_accumulates_multiple_memories(self):
+        mem = MemorySystem()
+        for x in range(3):
+            mem.record_visit((x, 0))
+            mem.record_experience((x, 0), StimulusType.FOOD, intensity=0.8, reward=0.5)
+        val = mem.estimate_value((0, 0), StimulusType.FOOD, discount=0.9)
+        expected = 0.5 + 0.9 * 0.5 + 0.81 * 0.5
+        assert abs(val - expected) < 1e-9
+
+    def test_respects_horizon(self):
+        mem = MemorySystem()
+        for x in range(10):
+            mem.record_visit((x, 0))
+        mem.record_experience((8, 0), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        val_short = mem.estimate_value((0, 0), StimulusType.FOOD, horizon=3)
+        val_long = mem.estimate_value((0, 0), StimulusType.FOOD, horizon=10)
+        assert val_short == 0.0  # food at distance 8, horizon 3 can't reach
+        assert val_long > 0.0
+
+    def test_filters_by_stimulus_type(self):
+        mem = MemorySystem()
+        mem.record_visit((5, 5))
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.record_experience((5, 5), StimulusType.WATER, intensity=0.9, reward=0.8)
+        food_val = mem.estimate_value((5, 5), StimulusType.FOOD)
+        water_val = mem.estimate_value((5, 5), StimulusType.WATER)
+        assert food_val == 1.0
+        assert abs(water_val - 0.8) < 1e-9
+
+    def test_weights_by_strength(self):
+        mem = MemorySystem()
+        mem.record_visit((5, 5))
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.cognitive_map[(5, 5)][0].strength = 0.5
+        val = mem.estimate_value((5, 5), StimulusType.FOOD)
+        assert abs(val - 0.5) < 1e-9  # reward * strength = 1.0 * 0.5
+
+    def test_higher_value_toward_food(self):
+        """Direction with food should have higher estimated value."""
+        mem = MemorySystem()
+        # Path east: (5,5) -> (6,5) -> (7,5) with food at (7,5)
+        for x in range(5, 8):
+            mem.record_visit((x, 0))
+        mem.record_experience((7, 0), StimulusType.FOOD, intensity=1.0, reward=1.0)
+        # Path west: (5,5) -> (4,5) -> (3,5), no food
+        for x in range(3, 6):
+            mem.record_visit((x, 0))
+        val_east = mem.estimate_value((6, 0), StimulusType.FOOD)
+        val_west = mem.estimate_value((4, 0), StimulusType.FOOD)
+        assert val_east > val_west
+
+
 class TestDensityField:
     def test_density_field_empty_map_returns_zeros(self):
         mem = MemorySystem()
