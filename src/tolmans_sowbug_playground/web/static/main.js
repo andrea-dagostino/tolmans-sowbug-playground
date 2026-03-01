@@ -30,6 +30,12 @@ let showCognitiveMap = true;
 let showPerception = true;
 let showDensityField = true;
 let showVTE = true;
+let showLegend = true;
+let driveChartHoverX = null;
+let accuracyChartHoverX = null;
+let eventLog = [];
+let _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
+let _firstDeliberation = false;
 
 function updateCanvasSize(w, h) {
     gridWidth = w;
@@ -71,6 +77,9 @@ function connectWebSocket() {
         if (tick <= lastRecordedTick) {
             accuracyHistory = [];
             driveHistory = [];
+            eventLog = [];
+            _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
+            _firstDeliberation = false;
         }
         lastRecordedTick = tick;
         if (latestState.agents && latestState.agents.length > 0) {
@@ -88,6 +97,30 @@ function connectWebSocket() {
                 else if (kl.includes("temperature")) entry.temperature = v;
             }
             driveHistory.push(entry);
+
+            // Detect events for chart annotations
+            if (driveHistory.length > 1) {
+                const prev = _lastDrives;
+                const DROP_THRESHOLD = 0.15;
+                if (prev.hunger - entry.hunger > DROP_THRESHOLD) {
+                    const exists = eventLog.some(e => e.label === "Food found" && Math.abs(e.tick - tick) < 3);
+                    if (!exists) eventLog.push({ tick, label: "Food found" });
+                }
+                if (prev.thirst - entry.thirst > DROP_THRESHOLD) {
+                    const exists = eventLog.some(e => e.label === "Water found" && Math.abs(e.tick - tick) < 3);
+                    if (!exists) eventLog.push({ tick, label: "Water found" });
+                }
+                if (prev.temperature - entry.temperature > DROP_THRESHOLD) {
+                    const exists = eventLog.some(e => e.label === "Heat found" && Math.abs(e.tick - tick) < 3);
+                    if (!exists) eventLog.push({ tick, label: "Heat found" });
+                }
+            }
+            _lastDrives = { hunger: entry.hunger, thirst: entry.thirst, temperature: entry.temperature };
+
+            if (!_firstDeliberation && agent.vte && agent.vte.is_deliberating) {
+                _firstDeliberation = true;
+                eventLog.push({ tick, label: "First VTE" });
+            }
         }
         renderChart();
         renderDriveChart();
@@ -441,6 +474,65 @@ function renderChart() {
     cCtx.closePath();
     cCtx.fillStyle = "rgba(0, 137, 123, 0.08)";
     cCtx.fill();
+
+    // Event annotations
+    for (const evt of eventLog) {
+        const ex = pad.left + ((evt.tick - minTick) / tickRange) * plotW;
+        if (ex < pad.left || ex > pad.left + plotW) continue;
+        cCtx.strokeStyle = "rgba(0,0,0,0.15)";
+        cCtx.lineWidth = 1;
+        cCtx.setLineDash([3, 3]);
+        cCtx.beginPath();
+        cCtx.moveTo(ex, pad.top);
+        cCtx.lineTo(ex, pad.top + plotH);
+        cCtx.stroke();
+        cCtx.setLineDash([]);
+    }
+
+    // Hover crosshair and tooltip
+    if (accuracyChartHoverX !== null) {
+        const hx = accuracyChartHoverX;
+        if (hx >= pad.left && hx <= pad.left + plotW) {
+            cCtx.strokeStyle = "rgba(0,0,0,0.3)";
+            cCtx.lineWidth = 1;
+            cCtx.setLineDash([2, 2]);
+            cCtx.beginPath();
+            cCtx.moveTo(hx, pad.top);
+            cCtx.lineTo(hx, pad.top + plotH);
+            cCtx.stroke();
+            cCtx.setLineDash([]);
+
+            const hoverTick = minTick + ((hx - pad.left) / plotW) * tickRange;
+            let closest = accuracyHistory[0];
+            let minDist = Infinity;
+            for (const d of accuracyHistory) {
+                const dist = Math.abs(d.tick - hoverTick);
+                if (dist < minDist) { minDist = dist; closest = d; }
+            }
+
+            const tooltipW = 100;
+            const tooltipH = 28;
+            let tx = hx + 8;
+            if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
+            let ty = pad.top + 4;
+
+            cCtx.fillStyle = "rgba(255,255,255,0.92)";
+            cCtx.strokeStyle = "#ccc";
+            cCtx.lineWidth = 1;
+            cCtx.beginPath();
+            cCtx.roundRect(tx, ty, tooltipW, tooltipH, 3);
+            cCtx.fill();
+            cCtx.stroke();
+
+            cCtx.font = "9px monospace";
+            cCtx.textAlign = "left";
+            cCtx.textBaseline = "top";
+            cCtx.fillStyle = "#333";
+            cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
+            cCtx.fillStyle = "#00897B";
+            cCtx.fillText(`Acc: ${(closest.accuracy * 100).toFixed(1)}%`, tx + 4, ty + 16);
+        }
+    }
 }
 
 // --- Drive monitoring chart ---
@@ -543,6 +635,77 @@ function renderDriveChart() {
         cCtx.fillStyle = "#666";
         cCtx.fillText(s.label, legendX + 13, legendY - 2);
         legendX += cCtx.measureText(s.label).width + 22;
+    }
+
+    // Event annotations
+    for (const evt of eventLog) {
+        const ex = pad.left + ((evt.tick - minTick) / tickRange) * plotW;
+        if (ex < pad.left || ex > pad.left + plotW) continue;
+        cCtx.strokeStyle = "rgba(0,0,0,0.2)";
+        cCtx.lineWidth = 1;
+        cCtx.setLineDash([3, 3]);
+        cCtx.beginPath();
+        cCtx.moveTo(ex, pad.top);
+        cCtx.lineTo(ex, pad.top + plotH);
+        cCtx.stroke();
+        cCtx.setLineDash([]);
+        cCtx.save();
+        cCtx.fillStyle = "#888";
+        cCtx.font = "8px sans-serif";
+        cCtx.textAlign = "left";
+        cCtx.translate(ex + 2, pad.top + 2);
+        cCtx.rotate(-Math.PI / 4);
+        cCtx.fillText(evt.label, 0, 0);
+        cCtx.restore();
+    }
+
+    // Hover crosshair and tooltip
+    if (driveChartHoverX !== null) {
+        const hx = driveChartHoverX;
+        if (hx >= pad.left && hx <= pad.left + plotW) {
+            cCtx.strokeStyle = "rgba(0,0,0,0.3)";
+            cCtx.lineWidth = 1;
+            cCtx.setLineDash([2, 2]);
+            cCtx.beginPath();
+            cCtx.moveTo(hx, pad.top);
+            cCtx.lineTo(hx, pad.top + plotH);
+            cCtx.stroke();
+            cCtx.setLineDash([]);
+
+            const hoverTick = minTick + ((hx - pad.left) / plotW) * tickRange;
+            let closest = driveHistory[0];
+            let minDist = Infinity;
+            for (const d of driveHistory) {
+                const dist = Math.abs(d.tick - hoverTick);
+                if (dist < minDist) { minDist = dist; closest = d; }
+            }
+
+            const tooltipW = 110;
+            const tooltipH = 48;
+            let tx = hx + 8;
+            if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
+            let ty = pad.top + 4;
+
+            cCtx.fillStyle = "rgba(255,255,255,0.92)";
+            cCtx.strokeStyle = "#ccc";
+            cCtx.lineWidth = 1;
+            cCtx.beginPath();
+            cCtx.roundRect(tx, ty, tooltipW, tooltipH, 3);
+            cCtx.fill();
+            cCtx.stroke();
+
+            cCtx.font = "9px monospace";
+            cCtx.textAlign = "left";
+            cCtx.textBaseline = "top";
+            cCtx.fillStyle = "#333";
+            cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
+            cCtx.fillStyle = "#4CAF50";
+            cCtx.fillText(`H: ${closest.hunger.toFixed(2)}`, tx + 4, ty + 16);
+            cCtx.fillStyle = "#2196F3";
+            cCtx.fillText(`T: ${closest.thirst.toFixed(2)}`, tx + 4, ty + 28);
+            cCtx.fillStyle = "#F44336";
+            cCtx.fillText(`Tp: ${closest.temperature.toFixed(2)}`, tx + 4, ty + 38);
+        }
     }
 }
 
@@ -693,13 +856,14 @@ function updateDashboard(state) {
         }
         const bar = document.getElementById(`bar-${name}`);
         const valEl = document.getElementById(`val-${name}`);
+        const color = urgencyColor(val);
         if (bar) {
             bar.style.width = `${val * 100}%`;
-            bar.style.background = urgencyColor(val);
+            bar.style.background = color;
         }
         if (valEl) {
             valEl.textContent = val.toFixed(2);
-            valEl.style.color = urgencyColor(val);
+            valEl.style.color = color;
         }
     }
 
@@ -851,6 +1015,30 @@ canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     const [x, y] = canvasToGrid(e);
     send({ action: "remove_stimulus", position: [x, y] });
+});
+
+// --- Chart hover events ---
+const driveChartCanvas = document.getElementById("drive-chart-canvas");
+const coverageChartCanvas = document.getElementById("coverage-chart-canvas");
+
+driveChartCanvas.addEventListener("mousemove", (e) => {
+    const rect = driveChartCanvas.getBoundingClientRect();
+    driveChartHoverX = e.clientX - rect.left;
+    renderDriveChart();
+});
+driveChartCanvas.addEventListener("mouseleave", () => {
+    driveChartHoverX = null;
+    renderDriveChart();
+});
+
+coverageChartCanvas.addEventListener("mousemove", (e) => {
+    const rect = coverageChartCanvas.getBoundingClientRect();
+    accuracyChartHoverX = e.clientX - rect.left;
+    renderChart();
+});
+coverageChartCanvas.addEventListener("mouseleave", () => {
+    accuracyChartHoverX = null;
+    renderChart();
 });
 
 // Start
