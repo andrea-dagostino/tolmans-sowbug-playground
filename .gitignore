@@ -6,3 +6,4 @@ dist/
 build/
 output_*.json
 output_*.csv
+.worktrees/
