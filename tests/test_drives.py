@@ -63,6 +63,25 @@ class TestDrive:
         d.update()
         assert abs(d.level - 0.1) < 1e-9  # no satiety, full rate
 
+    def test_satisfy_boosts_satiety(self):
+        d = Drive(DriveType.HUNGER, level=0.8, rate=0.01)
+        d.satisfy(0.3)
+        assert abs(d.level - 0.5) < 1e-9
+        assert abs(d.satiety - 0.3) < 1e-9
+
+    def test_satisfy_satiety_capped_at_one(self):
+        d = Drive(DriveType.HUNGER, level=0.8, rate=0.01)
+        d.satiety = 0.9
+        d.satisfy(0.3)
+        assert d.satiety == 1.0
+
+    def test_multiple_small_satisfactions_accumulate_satiety(self):
+        d = Drive(DriveType.HUNGER, level=0.8, rate=0.01, satiety_decay_rate=0.0)
+        d.satisfy(0.1)
+        d.satisfy(0.1)
+        d.satisfy(0.1)
+        assert abs(d.satiety - 0.3) < 1e-9
+
 
 class TestDriveSystem:
     def test_creation_with_drives(self):
