@@ -1,3 +1,4 @@
+from collections import deque
 from dataclasses import dataclass
 
 from some_sim.core.stimulus import StimulusType
@@ -19,6 +20,7 @@ class MemorySystem:
         self.decay_rate = decay_rate
         self.cognitive_map: dict[tuple[int, int], list[MemoryEntry]] = {}
         self.edges: dict[tuple[tuple[int, int], tuple[int, int]], int] = {}
+        self.visited: dict[tuple[int, int], float] = {}
 
     def record_experience(
         self,
@@ -73,6 +75,30 @@ class MemorySystem:
                         best_pos = pos
         return best_pos
 
+    def record_visit(self, position: tuple[int, int]) -> None:
+        self.visited[position] = 1.0
+
+    def find_path(
+        self, start: tuple[int, int], goal: tuple[int, int]
+    ) -> list[tuple[int, int]] | None:
+        if start not in self.visited or goal not in self.visited:
+            return None
+        if start == goal:
+            return [start]
+        queue = deque([(start, [start])])
+        seen = {start}
+        while queue:
+            current, path = queue.popleft()
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                neighbor = (current[0] + dx, current[1] + dy)
+                if neighbor in self.visited and neighbor not in seen:
+                    new_path = path + [neighbor]
+                    if neighbor == goal:
+                        return new_path
+                    seen.add(neighbor)
+                    queue.append((neighbor, new_path))
+        return None
+
     def update_expectation(
         self,
         position: tuple[int, int],
@@ -111,3 +137,11 @@ class MemorySystem:
                 positions_to_clean.append(pos)
         for pos in positions_to_clean:
             del self.cognitive_map[pos]
+
+        visited_to_remove = []
+        for pos in self.visited:
+            self.visited[pos] -= self.decay_rate
+            if self.visited[pos] < 0.01:
+                visited_to_remove.append(pos)
+        for pos in visited_to_remove:
+            del self.visited[pos]

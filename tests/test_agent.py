@@ -60,3 +60,59 @@ class TestAgent:
         assert state["orientation"] == "NORTH"
         assert "drive_levels" in state
         assert DriveType.HUNGER in state["drive_levels"]
+
+    def test_get_state_includes_visualization_keys(self):
+        agent = self._make_agent()
+        state = agent.get_state()
+        assert "perceptions" in state
+        assert "cognitive_map" in state
+        assert "cognitive_map_edges" in state
+        assert "perception_radius" in state
+        assert isinstance(state["perceptions"], list)
+        assert isinstance(state["cognitive_map"], dict)
+        assert isinstance(state["cognitive_map_edges"], list)
+
+    def test_get_state_cognitive_map_format(self):
+        agent = self._make_agent()
+        agent.memory_system.record_experience(
+            (3, 4), StimulusType.FOOD, 0.8, 1.0
+        )
+        agent.memory_system.record_traversal((5, 5), (5, 4))
+        state = agent.get_state()
+        assert "3,4" in state["cognitive_map"]
+        entries = state["cognitive_map"]["3,4"]
+        assert len(entries) == 1
+        assert entries[0]["stimulus_type"] == "food"
+        assert entries[0]["expected_intensity"] == 0.8
+        assert entries[0]["reward_value"] == 1.0
+        assert entries[0]["strength"] == 1.0
+        assert len(state["cognitive_map_edges"]) == 1
+        edge = state["cognitive_map_edges"][0]
+        assert edge["from"] == [5, 5]
+        assert edge["to"] == [5, 4]
+        assert edge["count"] == 1
+
+    def test_get_state_includes_visited_cells(self):
+        agent = self._make_agent()
+        agent.memory_system.record_visit((3, 4))
+        agent.memory_system.record_visit((5, 5))
+        state = agent.get_state()
+        assert "visited_cells" in state
+        assert "3,4" in state["visited_cells"]
+        assert state["visited_cells"]["3,4"] == 1.0
+        assert "5,5" in state["visited_cells"]
+
+    def test_get_state_perception_format(self):
+        agent = self._make_agent()
+        env = Environment(width=20, height=20)
+        food = Stimulus(StimulusType.FOOD, (5, 3), intensity=1.0, radius=5.0)
+        env.add_stimulus(food)
+        agent.perceive(env)
+        state = agent.get_state()
+        assert len(state["perceptions"]) == 1
+        p = state["perceptions"][0]
+        assert p["stimulus_type"] == "food"
+        assert p["stimulus_position"] == [5, 3]
+        assert isinstance(p["perceived_intensity"], float)
+        assert isinstance(p["distance"], float)
+        assert p["direction"] == [0, -2]

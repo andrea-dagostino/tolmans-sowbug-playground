@@ -120,11 +120,23 @@ class Sowbug(Agent):
 
         remembered_pos = self.memory_system.get_best_location_for(target_stimulus)
         if remembered_pos is not None and remembered_pos != self.position:
-            direction = self._direction_toward(remembered_pos)
+            direction = self._navigate_toward(remembered_pos)
         else:
             direction = self._explore()
 
         return self._apply_aversion(direction)
+
+    def _navigate_toward(self, target: tuple[int, int]) -> Direction:
+        path = self.memory_system.find_path(self.position, target)
+        if path is not None and len(path) >= 2:
+            next_pos = path[1]
+            dx = next_pos[0] - self.position[0]
+            dy = next_pos[1] - self.position[1]
+            if abs(dx) >= abs(dy):
+                return Direction.EAST if dx > 0 else Direction.WEST
+            else:
+                return Direction.SOUTH if dy > 0 else Direction.NORTH
+        return self._direction_toward(target)
 
     def post_act(self, environment: Environment) -> None:
         """Called after acting — updates drives, memory, and expectations."""
@@ -176,3 +188,4 @@ class Sowbug(Agent):
                         )
 
         self.memory_system.decay()
+        self.memory_system.record_visit(self.position)

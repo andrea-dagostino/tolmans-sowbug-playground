@@ -96,6 +96,50 @@ class TestSowbugDecisionMaking:
         assert entry is not None
 
 
+class TestSowbugSpatialLearning:
+    def test_records_visited_cells(self):
+        bug = Sowbug(position=(5, 5))
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+
+        env = Environment(width=20, height=20)
+        food = Stimulus(StimulusType.FOOD, (5, 5), intensity=1.0, radius=3.0)
+        env.add_stimulus(food)
+
+        bug.perceive(env)
+        bug.post_act(env)
+        assert (5, 5) in bug.memory_system.visited
+        assert bug.memory_system.visited[(5, 5)] == 1.0
+
+    def test_records_visit_on_empty_cell(self):
+        bug = Sowbug(position=(5, 5))
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        bug.post_act(env)
+        assert (5, 5) in bug.memory_system.visited
+
+    def test_uses_pathfinding_when_path_exists(self):
+        bug = Sowbug(position=(0, 0))
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Plant a memory of food at (2, 0)
+        bug.memory_system.record_experience(
+            (2, 0), StimulusType.FOOD, intensity=1.0, reward=1.0
+        )
+        # Create visited path: (0,0) -> (1,0) -> (2,0)
+        bug.memory_system.record_visit((0, 0))
+        bug.memory_system.record_visit((1, 0))
+        bug.memory_system.record_visit((2, 0))
+
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        direction = bug.decide()
+        bug.act(direction, env)
+        # Should follow path to (1, 0) — the next step
+        assert bug.position == (1, 0)
+
+
 class TestSowbugDriveMapping:
     def test_hunger_maps_to_food(self):
         bug = Sowbug(position=(5, 5))

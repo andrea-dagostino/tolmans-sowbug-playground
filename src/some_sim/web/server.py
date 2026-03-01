@@ -7,6 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from some_sim.analysis.recorder import _make_json_safe
 from some_sim.core.config import SimulationConfig, build_simulation
 from some_sim.core.simulation import Simulation
 
@@ -56,7 +57,7 @@ async def websocket_endpoint(ws: WebSocket):
                     if _simulation:
                         _simulation.step()
                         await ws.send_text(
-                            json.dumps(_simulation.get_state(), default=str)
+                            json.dumps(_make_json_safe(_simulation.get_state()))
                         )
                 elif action == "speed":
                     _speed = max(1, min(60, data.get("value", 5)))
@@ -64,7 +65,7 @@ async def websocket_endpoint(ws: WebSocket):
                     _init_simulation()
                     if _simulation:
                         await ws.send_text(
-                            json.dumps(_simulation.get_state(), default=str)
+                            json.dumps(_make_json_safe(_simulation.get_state()))
                         )
                 elif action == "add_stimulus":
                     if _simulation:
@@ -86,7 +87,7 @@ async def websocket_endpoint(ws: WebSocket):
             if _running and _simulation:
                 _simulation.step()
                 state = _simulation.get_state()
-                await ws.send_text(json.dumps(state, default=str))
+                await ws.send_text(json.dumps(_make_json_safe(state)))
                 await asyncio.sleep(1.0 / _speed)
             else:
                 await asyncio.sleep(0.05)
