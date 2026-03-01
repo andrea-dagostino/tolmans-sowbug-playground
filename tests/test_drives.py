@@ -130,6 +130,13 @@ class TestDriveSystem:
         levels = ds.get_levels()
         assert levels == {DriveType.HUNGER: 0.5, DriveType.THIRST: 0.3}
 
+    def test_get_satiety_levels(self):
+        d = Drive(DriveType.HUNGER, level=0.5)
+        d.satiety = 0.3
+        ds = DriveSystem(drives=[d])
+        satiety = ds.get_satiety_levels()
+        assert satiety == {DriveType.HUNGER: 0.3}
+
     def test_get_level_missing_drive(self):
         ds = DriveSystem()
         assert ds.get_level(DriveType.HUNGER) == 0.0

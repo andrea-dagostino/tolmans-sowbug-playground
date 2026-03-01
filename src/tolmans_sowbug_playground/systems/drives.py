@@ -52,3 +52,6 @@ class DriveSystem:
 
     def get_levels(self) -> dict[DriveType, float]:
         return {dt: d.level for dt, d in self.drives.items()}
+
+    def get_satiety_levels(self) -> dict[DriveType, float]:
+        return {dt: d.satiety for dt, d in self.drives.items()}
