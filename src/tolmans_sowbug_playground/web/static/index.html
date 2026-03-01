@@ -16,7 +16,7 @@
             <!-- Left column: Environment + Monitoring -->
             <div id="env-column">
                 <div id="grid-container">
-                    <canvas id="grid-canvas" width="600" height="600"></canvas>
+                    <canvas id="grid-canvas" width="600" height="600" aria-label="Simulation grid showing the agent, resources, and cognitive map overlays" role="img"></canvas>
                 </div>
                 <div id="env-toolbar">
                     <div class="toolbar-section">
@@ -49,9 +49,9 @@
                 <div class="panel" id="monitoring">
                     <h2>Monitoring</h2>
                         <h3 class="chart-label">Drives over time</h3>
-                    <canvas id="drive-chart-canvas" height="160"></canvas>
+                    <canvas id="drive-chart-canvas" height="160" aria-label="Drive levels over time chart" role="img"></canvas>
                     <h3 class="chart-label">Prediction Accuracy</h3>
-                    <canvas id="coverage-chart-canvas" height="120"></canvas>
+                    <canvas id="coverage-chart-canvas" height="120" aria-label="Prediction accuracy over time chart" role="img"></canvas>
                     <details class="panel-help">
                         <summary>?</summary>
                         <dl>
@@ -268,6 +268,7 @@
                     </div>
                 </div>
             </aside>
+                <div id="a11y-live" aria-live="polite" class="sr-only"></div>
         </main>
     </div>
     <script src="/static/main.js"></script>

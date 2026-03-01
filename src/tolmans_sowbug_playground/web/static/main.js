@@ -945,6 +945,10 @@ function updateDashboard(state) {
             valEl.textContent = val.toFixed(2);
             valEl.style.color = color;
         }
+        const barBg = bar ? bar.parentElement : null;
+        if (barBg && barBg.hasAttribute("aria-valuenow")) {
+            barBg.setAttribute("aria-valuenow", val.toFixed(2));
+        }
     }
 
     document.getElementById("agent-pos").textContent =
@@ -954,6 +958,7 @@ function updateDashboard(state) {
     updatePerceptionList(agent);
     updateMemorySummary(agent);
     updateVTESummary(agent);
+    updateA11yLiveRegion(state);
 }
 
 function updateVTESummary(agent) {
@@ -1132,6 +1137,37 @@ coverageChartCanvas.addEventListener("mouseleave", () => {
     accuracyChartHoverX = null;
     renderChart();
 });
+
+// --- Keyboard shortcuts ---
+document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+    if (e.code === "Space") {
+        e.preventDefault();
+        const placeSection = document.getElementById("place-section");
+        if (placeSection.classList.contains("editing-disabled")) {
+            document.getElementById("btn-pause").click();
+        } else {
+            document.getElementById("btn-play").click();
+        }
+    }
+});
+
+// --- Accessibility: periodic live region update ---
+let _a11yTick = 0;
+function updateA11yLiveRegion(state) {
+    if (!state.agents || state.agents.length === 0) return;
+    const tick = state.tick || 0;
+    if (tick - _a11yTick < 5) return;
+    _a11yTick = tick;
+    const agent = state.agents[0];
+    const drives = agent.drive_levels || {};
+    let summary = `Tick ${tick}. Position ${agent.position[0]},${agent.position[1]}.`;
+    for (const [k, v] of Object.entries(drives)) {
+        summary += ` ${k}: ${v.toFixed(2)}.`;
+    }
+    const el = document.getElementById("a11y-live");
+    if (el) el.textContent = summary;
+}
 
 // Start
 connectWebSocket();
