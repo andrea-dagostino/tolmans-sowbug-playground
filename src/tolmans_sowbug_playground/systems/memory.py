@@ -13,6 +13,8 @@ class MemoryEntry:
     reward_value: float
     strength: float = 1.0
     disappointments: int = 0
+    rehearsals: int = 1
+    stability: float = 1.0
 
 
 class MemorySystem:
@@ -46,6 +48,8 @@ class MemorySystem:
                 # gradual learning of intensity/reward via the learning rate.
                 entry.strength = 1.0
                 entry.disappointments = 0
+                entry.rehearsals += 1
+                entry.stability += 1.0 + entry.reward_value
                 return
         self.cognitive_map[position].append(
             MemoryEntry(
@@ -53,6 +57,7 @@ class MemorySystem:
                 expected_intensity=intensity,
                 reward_value=reward,
                 strength=1.0,
+                stability=1.0 + reward,
             )
         )
 
@@ -233,6 +238,7 @@ class MemorySystem:
             avg_error = (intensity_error + reward_error) / 2.0
             if avg_error < 0.2:
                 entry.strength = min(1.0, entry.strength + self.learning_rate * 0.5)
+                entry.stability += 0.5
             else:
                 entry.strength = max(0.0, entry.strength - avg_error * self.learning_rate)
 
@@ -241,7 +247,7 @@ class MemorySystem:
         for pos, entries in self.cognitive_map.items():
             to_remove = []
             for entry in entries:
-                entry.strength -= self.decay_rate
+                entry.strength *= (1 - self.decay_rate / entry.stability)
                 if entry.strength < 0.01:
                     to_remove.append(entry)
             for entry in to_remove:
@@ -253,7 +259,7 @@ class MemorySystem:
 
         visited_to_remove = []
         for pos in self.visited:
-            self.visited[pos] -= self.decay_rate
+            self.visited[pos] *= (1 - self.decay_rate)
             if self.visited[pos] < 0.01:
                 visited_to_remove.append(pos)
         for pos in visited_to_remove:

@@ -76,7 +76,8 @@ class TestMemorySystem:
         mem.decay()
         entry = mem.get_expected((5, 5), StimulusType.FOOD)
         assert entry is not None
-        assert entry.strength == 0.9
+        # reward=1.0 → stability=2.0 → strength = 1.0 * (1 - 0.1/2.0) = 0.95
+        assert abs(entry.strength - 0.95) < 1e-9
 
     def test_decay_removes_weak_entries(self):
         mem = MemorySystem(decay_rate=0.5)
@@ -521,3 +522,58 @@ class TestDisappointmentExtinction:
         mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
         assert entry.disappointments == 0
         assert entry.strength == 1.0
+
+
+class TestEbbinghausForgetting:
+    def test_rehearsal_increments_on_re_encounter(self):
+        mem = MemorySystem()
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        assert entry.rehearsals == 1
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        assert entry.rehearsals == 2
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        assert entry.rehearsals == 3
+
+    def test_stability_increases_on_re_encounter(self):
+        mem = MemorySystem()
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        initial_stability = entry.stability  # 1.0 + 1.0 = 2.0
+        assert abs(initial_stability - 2.0) < 1e-9
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        # stability += 1.0 + reward_value (1.0) = 2.0 boost
+        assert abs(entry.stability - 4.0) < 1e-9
+
+    def test_high_reward_decays_slower(self):
+        mem = MemorySystem(decay_rate=0.1)
+        mem.record_experience((1, 1), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        mem.record_experience((2, 2), StimulusType.LIGHT, intensity=0.8, reward=0.0)
+        mem.decay()
+        food = mem.get_expected((1, 1), StimulusType.FOOD)
+        light = mem.get_expected((2, 2), StimulusType.LIGHT)
+        # food: stability=2.0 → strength = 1 - 0.1/2.0 = 0.95
+        # light: stability=1.0 → strength = 1 - 0.1/1.0 = 0.90
+        assert food.strength > light.strength
+
+    def test_rehearsed_entry_decays_slower(self):
+        mem = MemorySystem(decay_rate=0.1)
+        # Single encounter
+        mem.record_experience((1, 1), StimulusType.FOOD, intensity=0.8, reward=0.5)
+        # Multiple encounters
+        mem.record_experience((2, 2), StimulusType.FOOD, intensity=0.8, reward=0.5)
+        mem.record_experience((2, 2), StimulusType.FOOD, intensity=0.8, reward=0.5)
+        mem.record_experience((2, 2), StimulusType.FOOD, intensity=0.8, reward=0.5)
+        mem.decay()
+        single = mem.get_expected((1, 1), StimulusType.FOOD)
+        multi = mem.get_expected((2, 2), StimulusType.FOOD)
+        assert multi.strength > single.strength
+
+    def test_accurate_prediction_boosts_stability(self):
+        mem = MemorySystem(learning_rate=0.1)
+        mem.record_experience((5, 5), StimulusType.FOOD, intensity=0.8, reward=1.0)
+        entry = mem.get_expected((5, 5), StimulusType.FOOD)
+        initial_stability = entry.stability
+        # Accurate prediction (error < 0.2)
+        mem.update_expectation((5, 5), StimulusType.FOOD, actual_intensity=0.8, actual_reward=1.0)
+        assert entry.stability == initial_stability + 0.5

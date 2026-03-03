@@ -68,6 +68,8 @@ class Agent(ABC):
                         "expected_intensity": round(entry.expected_intensity, 3),
                         "reward_value": round(entry.reward_value, 3),
                         "strength": round(entry.strength, 3),
+                        "rehearsals": entry.rehearsals,
+                        "stability": round(entry.stability, 3),
                     }
                     for entry in entries
                 ]

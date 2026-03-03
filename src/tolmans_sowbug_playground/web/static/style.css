@@ -52,9 +52,12 @@ main {
 #charts-area  { grid-area: charts; }
 #sidebar      { grid-area: sidebar; }
 
-/* ---- Canvas ---- */
+/* ---- Canvas + Trajectory side-by-side ---- */
 #canvas-area {
     min-width: 0;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
 }
 
 #grid-container {
@@ -64,9 +67,30 @@ main {
     padding: 3px;
     line-height: 0;
     width: fit-content;
+    flex-shrink: 0;
 }
 
 #grid-canvas { display: block; cursor: crosshair; }
+
+#trajectory-container {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    overflow: hidden;
+}
+
+#trajectory-canvas,
+#cogmap-replay-canvas {
+    flex: 1;
+    width: 100%;
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 3px;
+    display: block;
+    min-height: 0;
+}
 
 /* ---- Toolbar ---- */
 #toolbar-area {
@@ -162,17 +186,16 @@ main {
     margin-left: auto;
 }
 
-/* ---- Charts area (side by side) ---- */
+/* ---- Charts area (2×2 grid) ---- */
 #charts-area {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
     padding-top: 0.75rem;
     min-width: 0;
-    flex-wrap: wrap;
 }
 
 .chart-container {
-    flex: 1;
     min-width: 0;
 }
 
@@ -186,8 +209,9 @@ main {
 }
 
 #drive-chart-canvas,
+#satiety-chart-canvas,
 #coverage-chart-canvas,
-#trajectory-canvas {
+#memory-chart-canvas {
     width: 100%;
     background: #fff;
     border: 1px solid #eee;
@@ -195,11 +219,12 @@ main {
     display: block;
 }
 #drive-chart-canvas { height: 260px; }
+#satiety-chart-canvas { height: 260px; }
 #coverage-chart-canvas { height: 260px; }
-#trajectory-canvas { height: 260px; }
+#memory-chart-canvas { height: 260px; }
 
 #charts-area .panel-help {
-    flex-basis: 100%;
+    grid-column: 1 / -1;
     margin-top: 0.25rem;
     background: white;
     border: 1px solid #ddd;
@@ -425,6 +450,26 @@ main {
 .vte-candidate.chosen .vte-bar { background: #E040FB; }
 .vte-candidate .vte-val { width: 36px; font-family: monospace; font-size: 0.65rem; text-align: right; color: #888; }
 
+/* ---- Behavior mode badge ---- */
+.behavior-badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    margin-bottom: 0.2rem;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.mode-navigate { background: #E8F5E9; color: #2E7D32; }
+.mode-deliberate { background: #F3E5F5; color: #7B1FA2; }
+.mode-perceive { background: #E3F2FD; color: #1565C0; }
+.mode-memory_guided { background: #FFF3E0; color: #E65100; }
+.mode-explore { background: #F5F5F5; color: #616161; }
+.mode-frustrated { background: #FFEBEE; color: #C62828; }
+.mode-phototaxis { background: #FFFDE7; color: #F57F17; }
+.mode-idle { background: #FAFAFA; color: #9E9E9E; }
+
 /* ---- Inline help (details/summary) ---- */
 .panel-help {
     margin-top: 0.35rem;
@@ -459,6 +504,43 @@ main {
     margin-left: 0;
 }
 
+/* ---- Parameter Tuning ---- */
+.tuning-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-bottom: 0.25rem;
+}
+.tuning-row label {
+    width: 72px;
+    font-size: 0.7rem;
+    color: #555;
+    flex-shrink: 0;
+}
+.tuning-row input[type="range"] {
+    flex: 1;
+    margin: 0;
+    height: 14px;
+}
+.tuning-val {
+    width: 36px;
+    font-size: 0.7rem;
+    font-family: monospace;
+    text-align: right;
+    color: #666;
+}
+#btn-reset-tuning {
+    margin-top: 0.35rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    font-size: 0.7rem;
+    width: 100%;
+}
+#btn-reset-tuning:hover { background: #f0f0f0; }
+
 /* ---- Responsive ---- */
 @media (max-width: 1200px) {
     main {
@@ -483,6 +565,13 @@ main {
 }
 
 @media (max-width: 900px) {
+    #canvas-area {
+        flex-direction: column;
+    }
+    #trajectory-container {
+        align-self: auto;
+        height: 540px;
+    }
     #sidebar {
         flex-direction: column;
     }
@@ -501,7 +590,7 @@ main {
         height: 1px;
     }
     #charts-area {
-        flex-direction: column;
+        grid-template-columns: 1fr;
     }
 }
 

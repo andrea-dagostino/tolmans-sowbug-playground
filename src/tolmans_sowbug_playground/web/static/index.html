@@ -13,10 +13,18 @@
             <span id="tick-counter">Tick: 0</span>
         </header>
         <main>
-            <!-- Grid area: canvas -->
+            <!-- Grid area: canvas + trajectory side-by-side -->
             <div id="canvas-area">
                 <div id="grid-container">
                     <canvas id="grid-canvas" width="600" height="600" aria-label="Simulation grid showing the agent, resources, and cognitive map overlays" role="img"></canvas>
+                </div>
+                <div id="trajectory-container">
+                    <h3 class="chart-label">Trajectory</h3>
+                    <canvas id="trajectory-canvas" height="260" aria-label="Agent trajectory chart showing cumulative path with cardinal directions" role="img"></canvas>
+                    <h3 class="chart-label">Cognitive Map Replay</h3>
+                    <canvas id="cogmap-replay-canvas" height="260"
+                            aria-label="Cognitive map replay showing spatial memory at hovered tick"
+                            role="img"></canvas>
                 </div>
             </div>
 
@@ -32,6 +40,7 @@
                             <option value="Choice Point">Choice Point</option>
                             <option value="Light + Drives">Light + Drives</option>
                             <option value="Maze">Maze</option>
+                            <option value="Divided Foraging">Divided Foraging</option>
                         </select>
                         <label>W <input type="number" id="grid-width" value="20" min="5" max="100" aria-label="Grid width"></label>
                         <label>H <input type="number" id="grid-height" value="20" min="5" max="100" aria-label="Grid height"></label>
@@ -60,20 +69,30 @@
                     <canvas id="drive-chart-canvas" height="260" aria-label="Drive levels over time chart" role="img"></canvas>
                 </div>
                 <div class="chart-container">
+                    <h3 class="chart-label">Satiety Levels</h3>
+                    <canvas id="satiety-chart-canvas" height="260" aria-label="Satiety levels over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container">
                     <h3 class="chart-label">Resource Gathering</h3>
                     <canvas id="coverage-chart-canvas" height="260" aria-label="Resource gathering over time chart" role="img"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3 class="chart-label">Trajectory</h3>
-                    <canvas id="trajectory-canvas" height="260" aria-label="Agent trajectory chart showing cumulative path with cardinal directions" role="img"></canvas>
+                    <h3 class="chart-label">Memory Decay</h3>
+                    <canvas id="memory-chart-canvas" height="260" aria-label="Memory decay over time chart" role="img"></canvas>
                 </div>
                 <details class="panel-help">
                     <summary>?</summary>
                     <dl>
                         <dt>Drive Chart</dt>
                         <dd>Plots the drive level for hunger, thirst and temperature over simulation ticks. Drives rise at a fixed rate and drop when the agent reaches the matching stimulus.</dd>
+                        <dt>Satiety Levels</dt>
+                        <dd>Tracks satiety for each drive over time. Satiety rises when the agent consumes a resource and decays exponentially. High satiety suppresses drive growth, modelling a post-feeding refractory period.</dd>
                         <dt>Resource Gathering</dt>
                         <dd>Tracks how efficiently the agent gathers resources over time. The solid line shows cumulative resource consumptions (drive-reducing visits). The faded line shows a rolling rate (consumptions per 20 ticks). A steeper cumulative slope indicates faster resource gathering.</dd>
+                        <dt>Memory Decay</dt>
+                        <dd>Visualizes the Ebbinghaus forgetting curve per stimulus type. Each solid line shows mean memory strength for that stimulus (Food, Water, Light, Heat). Count (orange, dashed) shows total entries normalized to peak — drops indicate eviction events. Visited (gray, dotted) shows mean spatial familiarity across visited cells.</dd>
+                        <dt>Cognitive Map Replay</dt>
+                        <dd>Shows which stimuli the agent remembers at each grid position. Cell color indicates stimulus type; opacity indicates memory strength. Hover over the Drive chart to scrub through memory history. The orange dot marks the agent's position at that tick.</dd>
                     </dl>
                 </details>
             </div>
@@ -134,6 +153,35 @@
                                 <dd>Directional arrows showing simulated reward per direction. Purple = decided, magenta = deliberating. Arrow length = relative value.</dd>
                             </dl>
                         </details>
+                    </div>
+                    <div class="panel" id="tuning">
+                        <h2>Parameter Tuning</h2>
+                        <div class="tuning-row">
+                            <label for="tune-hunger_rate">Hunger rate</label>
+                            <input type="range" id="tune-hunger_rate" data-param="hunger_rate" min="0.001" max="0.05" step="0.001" value="0.01">
+                            <span class="tuning-val" id="tuneval-hunger_rate">0.010</span>
+                        </div>
+                        <div class="tuning-row">
+                            <label for="tune-thirst_rate">Thirst rate</label>
+                            <input type="range" id="tune-thirst_rate" data-param="thirst_rate" min="0.001" max="0.05" step="0.001" value="0.008">
+                            <span class="tuning-val" id="tuneval-thirst_rate">0.008</span>
+                        </div>
+                        <div class="tuning-row">
+                            <label for="tune-temperature_rate">Temp rate</label>
+                            <input type="range" id="tune-temperature_rate" data-param="temperature_rate" min="0.001" max="0.05" step="0.001" value="0.005">
+                            <span class="tuning-val" id="tuneval-temperature_rate">0.005</span>
+                        </div>
+                        <div class="tuning-row">
+                            <label for="tune-satiety_decay_rate">Satiety decay</label>
+                            <input type="range" id="tune-satiety_decay_rate" data-param="satiety_decay_rate" min="0.005" max="0.2" step="0.005" value="0.05">
+                            <span class="tuning-val" id="tuneval-satiety_decay_rate">0.050</span>
+                        </div>
+                        <div class="tuning-row">
+                            <label for="tune-bite_size">Bite size</label>
+                            <input type="range" id="tune-bite_size" data-param="bite_size" min="0.05" max="1.0" step="0.05" value="0.3">
+                            <span class="tuning-val" id="tuneval-bite_size">0.30</span>
+                        </div>
+                        <button id="btn-reset-tuning">Reset Defaults</button>
                     </div>
                 </div>
 
@@ -244,6 +292,7 @@
                             <p title="Maximum value in the KDE density field">Density peak: <span id="mem-density-peak">-</span></p>
                         </div>
                         <div class="panel-divider"></div>
+                        <div id="behavior-mode" class="behavior-badge mode-idle">idle</div>
                         <div id="vte-status">
                             <p class="empty-state">No deliberation</p>
                         </div>

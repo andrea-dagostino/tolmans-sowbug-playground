@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from tolmans_sowbug_playground.core.environment import Environment
-from tolmans_sowbug_playground.core.stimulus import Stimulus
+from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 
 
 @dataclass
@@ -24,6 +24,13 @@ class SensorSystem:
         )
         perceptions = []
         for stimulus, distance in stimuli_in_range:
+            # Non-obstacle stimuli require line-of-sight — the bug can't
+            # smell food through a solid wall.  Obstacles are always felt.
+            if (
+                stimulus.stimulus_type != StimulusType.OBSTACLE
+                and not environment.has_line_of_sight(position, stimulus.position)
+            ):
+                continue
             perceived_intensity = stimulus.perceived_intensity_at(position)
             direction = (
                 stimulus.position[0] - position[0],

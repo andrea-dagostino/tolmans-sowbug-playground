@@ -13,6 +13,9 @@ from tolmans_sowbug_playground.core.simulation import Simulation
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Divider wall: full-width horizontal wall at y=15
+_DIVIDER_WALL: list[tuple[int, int]] = [(x, 15) for x in range(20) if x not in (3, 4)]
+
 # Maze wall positions (x, y) for the multi-corridor preset
 _MAZE_WALLS: list[tuple[int, int]] = (
     [(x, 2) for x in (2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 16, 17)]
@@ -69,6 +72,35 @@ PRESETS: dict[str, dict] = {
             {"type": "light", "position": (3, 3)},
             {"type": "food", "position": (17, 17), "quantity": 5.0},
             {"type": "water", "position": (17, 3), "quantity": 5.0},
+        ],
+    },
+    "Divided Foraging": {
+        "grid_width": 20,
+        "grid_height": 20,
+        "agent_position": (11, 10),
+        "stimuli": [
+            # Light source above wall (right side)
+            {"type": "light", "position": (18, 13), "intensity": 1.0, "radius": 5.0},
+            # Food cluster (bottom-left)
+            {"type": "food", "position": (0, 17), "quantity": 5.0},
+            {"type": "food", "position": (0, 18), "quantity": 5.0},
+            {"type": "food", "position": (2, 18), "quantity": 5.0},
+            {"type": "food", "position": (0, 19), "quantity": 5.0},
+            {"type": "food", "position": (2, 19), "quantity": 5.0},
+            # Water sources (scattered below wall)
+            {"type": "water", "position": (2, 16), "quantity": 5.0},
+            {"type": "water", "position": (3, 18), "quantity": 5.0},
+            {"type": "water", "position": (1, 19), "quantity": 5.0},
+            {"type": "water", "position": (7, 19), "quantity": 5.0},
+            # Heat sources (bottom-middle)
+            {"type": "heat", "position": (10, 18), "intensity": 0.7, "radius": 5.0},
+            {"type": "heat", "position": (15, 18), "intensity": 0.7, "radius": 5.0},
+            {"type": "heat", "position": (11, 19), "intensity": 0.7, "radius": 5.0},
+            # Light source (bottom-right)
+            {"type": "light", "position": (19, 19), "intensity": 1.0, "radius": 5.0},
+        ] + [
+            {"type": "obstacle", "position": p, "intensity": 1.0, "radius": 0.0}
+            for p in _DIVIDER_WALL
         ],
     },
     "Maze": {
@@ -217,6 +249,24 @@ async def websocket_endpoint(ws: WebSocket):
                                     _make_json_safe(_simulation.get_state())
                                 )
                             )
+                elif action == "update_params":
+                    if _simulation and _simulation.agents:
+                        agent = _simulation.agents[0]
+                        param = data.get("param")
+                        value = float(data.get("value", 0))
+                        drives = agent.drive_system.drives
+                        from tolmans_sowbug_playground.systems.drives import DriveType
+                        if param == "hunger_rate":
+                            drives[DriveType.HUNGER].rate = value
+                        elif param == "thirst_rate":
+                            drives[DriveType.THIRST].rate = value
+                        elif param == "temperature_rate":
+                            drives[DriveType.TEMPERATURE].rate = value
+                        elif param == "satiety_decay_rate":
+                            for d in drives.values():
+                                d.satiety_decay_rate = value
+                        elif param == "bite_size":
+                            agent.bite_size = value
                 elif action == "save_preset":
                     preset_name = data.get("name", "").strip()
                     if preset_name and _simulation and _config:

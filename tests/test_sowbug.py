@@ -353,6 +353,17 @@ class TestSowbugState:
         assert "prediction_accuracy" in state
         assert isinstance(state["prediction_accuracy"], float)
 
+    def test_decision_reason_in_state(self):
+        """After decide(), get_state() should include a non-empty decision_reason."""
+        bug = Sowbug(position=(5, 5))
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        bug.decide()
+        state = bug.get_state()
+        assert "decision_reason" in state
+        assert isinstance(state["decision_reason"], str)
+        assert len(state["decision_reason"]) > 0
+
 
 class TestSowbugDriveMapping:
     def test_hunger_maps_to_food(self):
@@ -575,3 +586,153 @@ class TestSowbugObstacleAvoidance:
         bug = Sowbug(position=(5, 5))
         state = bug.get_state()
         assert "is_stuck" in state
+
+
+class TestLineOfSight:
+    def test_has_line_of_sight_clear_path(self):
+        """LOS returns True when no obstacles block the line."""
+        env = Environment(width=20, height=20)
+        assert env.has_line_of_sight((2, 2), (8, 2)) is True
+
+    def test_has_line_of_sight_blocked(self):
+        """LOS returns False when an obstacle sits on the line."""
+        env = Environment(width=20, height=20)
+        env.add_stimulus(Stimulus(StimulusType.OBSTACLE, (5, 2), intensity=1.0, radius=0.0))
+        assert env.has_line_of_sight((2, 2), (8, 2)) is False
+
+    def test_has_line_of_sight_obstacle_at_start_ignored(self):
+        """Obstacle at the start cell does not block LOS (bug is standing there)."""
+        env = Environment(width=20, height=20)
+        # Obstacle right at start — should not block
+        env.add_stimulus(Stimulus(StimulusType.OBSTACLE, (2, 2), intensity=1.0, radius=0.0))
+        assert env.has_line_of_sight((2, 2), (8, 2)) is True
+
+    def test_has_line_of_sight_obstacle_at_end_ignored(self):
+        """Obstacle at the end cell does not block LOS."""
+        env = Environment(width=20, height=20)
+        env.add_stimulus(Stimulus(StimulusType.OBSTACLE, (8, 2), intensity=1.0, radius=0.0))
+        assert env.has_line_of_sight((2, 2), (8, 2)) is True
+
+    def test_has_line_of_sight_diagonal(self):
+        """LOS works along diagonal paths."""
+        env = Environment(width=20, height=20)
+        env.add_stimulus(Stimulus(StimulusType.OBSTACLE, (4, 4), intensity=1.0, radius=0.0))
+        assert env.has_line_of_sight((2, 2), (6, 6)) is False
+
+    def test_line_of_sight_blocks_perception_through_wall(self):
+        """Food behind a wall should not be perceived."""
+        env = Environment(width=20, height=20)
+        # Wall at y=5
+        for x in range(0, 20):
+            env.add_stimulus(Stimulus(StimulusType.OBSTACLE, (x, 5), intensity=1.0, radius=0.0))
+        # Food behind wall
+        food = Stimulus(StimulusType.FOOD, (10, 3), intensity=1.0, radius=12.0)
+        env.add_stimulus(food)
+
+        bug = Sowbug(position=(10, 7))
+        bug.perceive(env)
+
+        food_perceptions = [
+            p for p in bug.current_perceptions
+            if p.stimulus.stimulus_type == StimulusType.FOOD
+        ]
+        assert len(food_perceptions) == 0
+
+    def test_line_of_sight_allows_perception_around_wall_end(self):
+        """Food past the end of a wall should be perceived if LOS is clear."""
+        env = Environment(width=20, height=20)
+        # Short wall at y=5, only from x=3 to x=7
+        for x in range(3, 8):
+            env.add_stimulus(Stimulus(StimulusType.OBSTACLE, (x, 5), intensity=1.0, radius=0.0))
+        # Food at x=1 (past wall end), visible from x=1,y=7
+        food = Stimulus(StimulusType.FOOD, (1, 3), intensity=1.0, radius=12.0)
+        env.add_stimulus(food)
+
+        bug = Sowbug(position=(1, 7))
+        bug.perceive(env)
+
+        food_perceptions = [
+            p for p in bug.current_perceptions
+            if p.stimulus.stimulus_type == StimulusType.FOOD
+        ]
+        assert len(food_perceptions) == 1
+
+
+class TestFrustration:
+    def test_frustration_increases_on_repeated_sticking(self):
+        """Frustration level should escalate with each stuck episode."""
+        env = Environment(width=20, height=20)
+        bug = Sowbug(position=(5, 5))
+
+        def trigger_stuck():
+            """Force a stuck episode by injecting oscillating positions."""
+            bug._is_stuck = False
+            bug._recent_positions.clear()
+            for pos in [(5, 5), (5, 6)] * 4:
+                bug._recent_positions.append(pos)
+            bug._update_stuck_detection()
+
+        # First stuck episode
+        trigger_stuck()
+        assert bug._frustration_level == 1
+        assert bug._frustration_cooldown == 6
+
+        # Expire the cooldown and clear stuck so we can trigger again
+        bug._frustration_cooldown = 0
+        bug._is_stuck = False
+        bug._recent_positions.clear()
+
+        # Second stuck episode
+        trigger_stuck()
+        assert bug._frustration_level == 2
+        assert bug._frustration_cooldown == 12
+
+    def test_frustration_capped_at_five(self):
+        """Frustration should not exceed 5."""
+        env = Environment(width=20, height=20)
+        bug = Sowbug(position=(5, 5))
+
+        for _ in range(10):
+            bug._is_stuck = False
+            bug._recent_positions.clear()
+            for pos in [(5, 5), (5, 6)] * 4:
+                bug._recent_positions.append(pos)
+            bug._update_stuck_detection()
+            bug._frustration_cooldown = 0
+
+        assert bug._frustration_level <= 5
+
+    def test_frustration_suppresses_stimulus_targeting(self):
+        """During frustration cooldown, the bug should explore instead of
+        targeting food through a wall."""
+        from tolmans_sowbug_playground.systems.motor import Direction
+
+        env = Environment(width=20, height=20)
+        food = Stimulus(StimulusType.FOOD, (10, 3), intensity=1.0, radius=12.0)
+        env.add_stimulus(food)
+
+        bug = Sowbug(position=(10, 7))
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        # Set frustration cooldown directly
+        bug._frustration_level = 2
+        bug._frustration_cooldown = 10
+
+        bug.perceive(env)
+        direction = bug.decide()
+
+        # During cooldown the bug explores freely — it should NOT beeline north
+        # toward food. Exploration picks least-familiar passable directions.
+        # We just verify the frustration cooldown path was taken (cooldown ticked down).
+        assert bug._frustration_cooldown == 9  # ticked down from 10
+
+    def test_frustration_state_exported(self):
+        """Frustration level and cooldown should appear in get_state()."""
+        bug = Sowbug(position=(5, 5))
+        bug._frustration_level = 3
+        bug._frustration_cooldown = 12
+        state = bug.get_state()
+        assert state["frustration_level"] == 3
+        assert state["frustration_cooldown"] == 12

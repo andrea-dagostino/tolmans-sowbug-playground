@@ -75,6 +75,13 @@ class Sowbug(Agent):
         self._recent_positions: deque[tuple[int, int]] = deque(maxlen=self._stuck_window)
         self._is_stuck: bool = False
 
+        # Frustration — escalating cooldown when repeatedly getting stuck
+        self._frustration_level: int = 0
+        self._frustration_cooldown: int = 0
+
+        # Decision reason — set each tick for frontend visualization
+        self._decision_reason: str = ""
+
     def perceive(self, environment: Environment) -> None:
         self._grid_size = (environment.width, environment.height)
         super().perceive(environment)
@@ -157,6 +164,15 @@ class Sowbug(Agent):
         candidates = []
         for direction, (nx, ny) in self._passable_moves.items():
             familiarity = self.memory_system.visited.get((nx, ny), 0.0)
+
+            # During frustration, add a lookahead penalty: sum familiarity
+            # of cells 2-3 steps ahead to bias away from well-trodden zones.
+            if self._frustration_level > 0:
+                dx, dy = direction.value
+                for step in (2, 3):
+                    lx, ly = nx + dx * (step - 1), ny + dy * (step - 1)
+                    familiarity += 0.5 * self.memory_system.visited.get((lx, ly), 0.0)
+
             candidates.append((direction, familiarity))
 
         if not candidates:
@@ -168,6 +184,8 @@ class Sowbug(Agent):
 
     def _explore(self) -> Direction:
         if self._is_stuck:
+            if not self._decision_reason:
+                self._decision_reason = "explore"
             return self._explore_freely()
 
         urgent = self.drive_system.get_most_urgent()
@@ -179,9 +197,19 @@ class Sowbug(Agent):
                 if p.stimulus.stimulus_type == target_type
             ]
             if relevant:
+                self._decision_reason = "perceive"
                 strongest = max(relevant, key=lambda p: p.perceived_intensity)
                 return self._direction_toward(strongest.stimulus.position)
 
+            # No stimulus in sensor range — head toward best remembered location
+            remembered = self.memory_system.get_best_location_for(
+                target_type, self._grid_size[0], self._grid_size[1]
+            )
+            if remembered is not None and remembered != self.position:
+                self._decision_reason = "memory_guided"
+                return self._direction_toward(remembered)
+
+        self._decision_reason = "explore"
         return self._explore_freely()
 
     def _get_avg_memory_strength(self, stimulus_type: StimulusType) -> float:
@@ -223,7 +251,7 @@ class Sowbug(Agent):
             # No information in any direction — can't deliberate
             self._is_deliberating = False
             self._vte_hesitated = False
-            return self._explore()
+            return self._explore()  # _explore() sets its own reason
 
         # Check if top two options are close enough to trigger deliberation
         if best_val > 0 and second_val / best_val >= self._vte_threshold:
@@ -231,23 +259,39 @@ class Sowbug(Agent):
             # Hesitation: sometimes pause instead of committing
             if random.random() < self._vte_hesitation_rate:
                 self._vte_hesitated = True
+                self._decision_reason = "deliberate"
                 self._vte_chosen = "STAY"
                 return Direction.STAY
         else:
             self._is_deliberating = False
 
         self._vte_hesitated = False
+        self._decision_reason = "deliberate"
         chosen_name = candidates[0]["direction"]
         self._vte_chosen = chosen_name
         return Direction[chosen_name]
 
     def _update_stuck_detection(self) -> None:
         self._recent_positions.append(self.position)
+        was_stuck = self._is_stuck
         if len(self._recent_positions) >= self._stuck_window:
             unique = len(set(self._recent_positions))
             self._is_stuck = unique <= 3
         else:
             self._is_stuck = False
+
+        # Tick down cooldown before escalation check
+        if self._frustration_cooldown > 0:
+            self._frustration_cooldown -= 1
+
+        # Escalate frustration on each new stuck episode
+        if self._is_stuck and not was_stuck:
+            self._frustration_level = min(self._frustration_level + 1, 5)
+            self._frustration_cooldown = self._frustration_level * 6
+
+        # Gradually reduce frustration when free and cooldown expired
+        if not self._is_stuck and self._frustration_cooldown == 0 and self._frustration_level > 0:
+            self._frustration_level -= 1
 
     def decide(self) -> Direction:
         # Reset VTE state each tick
@@ -255,11 +299,14 @@ class Sowbug(Agent):
         self._is_deliberating = False
         self._vte_chosen = ""
         self._vte_hesitated = False
+        self._decision_reason = ""
 
         self._update_stuck_detection()
 
-        # When stuck, bypass all stimulus-directed navigation
-        if self._is_stuck:
+        # When stuck or still cooling down from frustration,
+        # bypass all stimulus-directed navigation
+        if self._is_stuck or self._frustration_cooldown > 0:
+            self._decision_reason = "frustrated"
             return self._explore_freely()
 
         urgent = self.drive_system.get_most_urgent()
@@ -267,10 +314,12 @@ class Sowbug(Agent):
             # No drives active — default behavior is positive phototaxis
             light_perceptions = self._get_light_perceptions()
             if light_perceptions:
+                self._decision_reason = "phototaxis"
                 strongest = max(
                     light_perceptions, key=lambda p: p.perceived_intensity
                 )
                 return self._direction_toward(strongest.stimulus.position)
+            self._decision_reason = "idle"
             if self._passable_moves:
                 return random.choice(list(self._passable_moves.keys()))
             return Direction.STAY
@@ -284,6 +333,7 @@ class Sowbug(Agent):
                 target_stimulus, self._grid_size[0], self._grid_size[1]
             )
             if remembered_pos is not None and remembered_pos != self.position:
+                self._decision_reason = "navigate"
                 direction = self._navigate_toward(remembered_pos)
             else:
                 direction = self._explore()
@@ -321,6 +371,9 @@ class Sowbug(Agent):
         }
         state["resource_consumptions"] = self._resource_consumptions
         state["is_stuck"] = self._is_stuck
+        state["frustration_level"] = self._frustration_level
+        state["frustration_cooldown"] = self._frustration_cooldown
+        state["decision_reason"] = self._decision_reason
         return state
 
     def post_act(self, environment: Environment) -> None:
