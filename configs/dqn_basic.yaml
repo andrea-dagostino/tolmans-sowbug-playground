@@ -1,0 +1,74 @@
+grid:
+  width: 20
+  height: 20
+
+simulation:
+  max_ticks: 10000
+  random_seed: 42
+
+stimuli:
+  - type: food
+    position: [15, 10]
+    intensity: 1.0
+    radius: 6.0
+    quantity: 50.0
+
+  - type: food
+    position: [3, 15]
+    intensity: 0.8
+    radius: 5.0
+    quantity: 50.0
+
+  - type: water
+    position: [10, 3]
+    intensity: 0.9
+    radius: 4.0
+    quantity: 50.0
+
+  - type: light
+    position: [10, 10]
+    intensity: 1.0
+    radius: 8.0
+
+  - type: heat
+    position: [18, 18]
+    intensity: 0.7
+    radius: 5.0
+
+  - type: obstacle
+    position: [7, 7]
+    intensity: 1.0
+    radius: 0.0
+
+  - type: obstacle
+    position: [7, 8]
+    intensity: 1.0
+    radius: 0.0
+
+  - type: obstacle
+    position: [7, 9]
+    intensity: 1.0
+    radius: 0.0
+
+agent:
+  type: dqn_sowbug
+  position: [5, 5]
+  # Drive params
+  hunger_rate: 0.01
+  thirst_rate: 0.008
+  temperature_rate: 0.005
+  perception_radius: 5.0
+  satiety_decay_rate: 0.05
+  bite_size: 0.3
+  # DQN params
+  dqn_hidden_size: 128
+  dqn_learning_rate: 0.0003
+  dqn_gamma: 0.99
+  dqn_eps_start: 0.9
+  dqn_eps_end: 0.05
+  dqn_eps_decay: 5000
+  dqn_tau: 0.005
+  dqn_batch_size: 128
+  dqn_replay_capacity: 50000
+  dqn_optimize_every: 1
+  dqn_perception_k: 3

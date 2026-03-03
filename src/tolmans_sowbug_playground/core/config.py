@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from tolmans_sowbug_playground.agents.dqn_sowbug import DQNSowbug
 from tolmans_sowbug_playground.agents.sowbug import Sowbug
 from tolmans_sowbug_playground.analysis.recorder import Recorder
 from tolmans_sowbug_playground.core.environment import Environment
@@ -100,6 +101,8 @@ def build_simulation(config: SimulationConfig) -> Simulation:
 
     if config.agent.agent_type == "sowbug":
         agent = Sowbug(position=config.agent.position, **config.agent.params)
+    elif config.agent.agent_type == "dqn_sowbug":
+        agent = DQNSowbug(position=config.agent.position, **config.agent.params)
     else:
         raise ValueError(f"Unknown agent type: {config.agent.agent_type}")
 
