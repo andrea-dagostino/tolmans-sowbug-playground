@@ -39,6 +39,11 @@ let memoryHistory = [];
 let cogMapHistory = [];
 let memoryChartHoverX = null;
 let _peakMemoryCount = 0;
+let rewardHistory = [];
+let lossHistory = [];
+let rewardChartHoverX = null;
+let lossChartHoverX = null;
+let _cumulativeReward = 0;
 let eventLog = [];
 let _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
 let _firstDeliberation = false;
@@ -117,12 +122,15 @@ function connectWebSocket() {
 
         // Track resource gathering history
         const tick = latestState.tick || 0;
-        if (tick <= lastRecordedTick) {
+        if (tick < lastRecordedTick) {
             resourceHistory = [];
             driveHistory = [];
             positionHistory = [];
             memoryHistory = [];
             cogMapHistory = [];
+            rewardHistory = [];
+            lossHistory = [];
+            _cumulativeReward = 0;
             _peakMemoryCount = 0;
             eventLog = [];
             _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
@@ -220,12 +228,40 @@ function connectWebSocket() {
             });
 
             cogMapHistory.push({ tick, cells: compactCogMapSnapshot(cogMap) });
+
+            // DQN-specific: track cumulative reward and training loss
+            if (agent.training_loss !== undefined) {
+                // Show DQN chart containers
+                const rc = document.getElementById("reward-chart-container");
+                const lc = document.getElementById("loss-chart-container");
+                if (rc) rc.style.display = "";
+                if (lc) lc.style.display = "";
+
+                // Compute per-tick reward from drive changes
+                let tickReward = 0;
+                if (driveHistory.length >= 2) {
+                    const prev = driveHistory[driveHistory.length - 2];
+                    const curr = driveHistory[driveHistory.length - 1];
+                    for (const key of ["hunger", "thirst", "temperature"]) {
+                        const reduction = prev[key] - curr[key];
+                        if (reduction > 0) tickReward += reduction;
+                    }
+                    const maxDrive = Math.max(curr.hunger, curr.thirst, curr.temperature);
+                    tickReward -= 0.01 * maxDrive;
+                }
+                _cumulativeReward += tickReward;
+                rewardHistory.push({ tick, cumulative: _cumulativeReward });
+
+                lossHistory.push({ tick, loss: agent.training_loss || 0 });
+            }
         }
         renderChart();
         renderDriveChart();
         renderSatietyChart();
         renderMemoryChart();
         renderTrajectoryChart();
+        renderRewardChart();
+        renderLossChart();
         renderCogMapReplay();
 
         render(latestState);
@@ -415,14 +451,17 @@ function renderVTE(state) {
     const cx = ax * cellSize + cellSize / 2;
     const cy = ay * cellSize + cellSize / 2;
 
-    const maxVal = Math.max(...vte.candidates.map(c => c.value), 0.001);
+    const allVals = vte.candidates.map(c => c.value);
+    const vteMin = Math.min(...allVals);
+    const vteMax = Math.max(...allVals);
+    const vteRange = vteMax - vteMin || 1;
 
     const dirDeltas = { NORTH: [0, -1], SOUTH: [0, 1], EAST: [1, 0], WEST: [-1, 0] };
     for (const candidate of vte.candidates) {
         const delta = dirDeltas[candidate.direction];
-        if (!delta || candidate.value <= 0) continue;
+        if (!delta) continue;
 
-        const norm = candidate.value / maxVal;
+        const norm = (candidate.value - vteMin) / vteRange;
         const arrowLen = cellSize * (0.4 + norm * 0.6);
         const endX = cx + delta[0] * arrowLen;
         const endY = cy + delta[1] * arrowLen;
@@ -1326,6 +1365,345 @@ function renderCogMapReplay() {
     c.fillText(`${cellEntries.length} cells`, W - 4, H - 4);
 }
 
+function renderRewardChart() {
+    const chartCanvas = document.getElementById("reward-chart-canvas");
+    if (!chartCanvas) return;
+    const cCtx = chartCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = chartCanvas.getBoundingClientRect();
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    cCtx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
+
+    cCtx.fillStyle = "#fff";
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = { top: 8, right: 12, bottom: 22, left: 42 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Axis frame
+    cCtx.strokeStyle = "#ccc";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, pad.top);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.stroke();
+
+    // Y-axis label
+    cCtx.save();
+    cCtx.fillStyle = "#888";
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.translate(8, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText("Cumul. Reward", 0, 0);
+    cCtx.restore();
+
+    // X-axis label
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
+
+    if (rewardHistory.length < 2) return;
+
+    const minTick = rewardHistory[0].tick;
+    const maxTick = rewardHistory[rewardHistory.length - 1].tick;
+    const tickRange = maxTick - minTick || 1;
+
+    const values = rewardHistory.map(d => d.cumulative);
+    const yMin = Math.min(0, ...values);
+    const yMax = Math.max(0.1, ...values);
+    const yRange = yMax - yMin || 1;
+
+    // Y grid & labels
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+        const frac = i / ySteps;
+        const val = yMin + frac * yRange;
+        const y = pad.top + plotH - frac * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillText(val.toFixed(1), pad.left - 4, y);
+    }
+
+    // Zero line
+    if (yMin < 0) {
+        const zeroY = pad.top + plotH - ((0 - yMin) / yRange) * plotH;
+        cCtx.strokeStyle = "rgba(0,0,0,0.15)";
+        cCtx.lineWidth = 1;
+        cCtx.setLineDash([4, 4]);
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, zeroY);
+        cCtx.lineTo(pad.left + plotW, zeroY);
+        cCtx.stroke();
+        cCtx.setLineDash([]);
+    }
+
+    // X-axis tick labels
+    cCtx.fillStyle = "#aaa";
+    cCtx.textBaseline = "top";
+    cCtx.textAlign = "center";
+    const tickStep = Math.max(1, Math.ceil(tickRange / 5));
+    for (let t = minTick; t <= maxTick; t += tickStep) {
+        const x = pad.left + ((t - minTick) / tickRange) * plotW;
+        cCtx.fillText(t, x, pad.top + plotH + 3);
+    }
+
+    // Cumulative reward line
+    const smoothed = smoothArray(values);
+    cCtx.strokeStyle = "#9C27B0";
+    cCtx.lineWidth = 2;
+    cCtx.beginPath();
+    for (let i = 0; i < rewardHistory.length; i++) {
+        const d = rewardHistory[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - ((smoothed[i] - yMin) / yRange) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    // Fill under curve
+    const lastD = rewardHistory[rewardHistory.length - 1];
+    const lastX = pad.left + ((lastD.tick - minTick) / tickRange) * plotW;
+    const baseY = pad.top + plotH - ((0 - yMin) / yRange) * plotH;
+    cCtx.lineTo(lastX, baseY);
+    cCtx.lineTo(pad.left, baseY);
+    cCtx.closePath();
+    cCtx.fillStyle = "rgba(156, 39, 176, 0.08)";
+    cCtx.fill();
+
+    // Hover crosshair
+    if (rewardChartHoverX !== null) {
+        const hx = rewardChartHoverX;
+        if (hx >= pad.left && hx <= pad.left + plotW) {
+            cCtx.strokeStyle = "rgba(0,0,0,0.3)";
+            cCtx.lineWidth = 1;
+            cCtx.setLineDash([2, 2]);
+            cCtx.beginPath();
+            cCtx.moveTo(hx, pad.top);
+            cCtx.lineTo(hx, pad.top + plotH);
+            cCtx.stroke();
+            cCtx.setLineDash([]);
+
+            const hoverTick = minTick + ((hx - pad.left) / plotW) * tickRange;
+            let closest = rewardHistory[0];
+            let minDist = Infinity;
+            for (const d of rewardHistory) {
+                const dist = Math.abs(d.tick - hoverTick);
+                if (dist < minDist) { minDist = dist; closest = d; }
+            }
+
+            const tooltipW = 120;
+            const tooltipH = 28;
+            let tx = hx + 8;
+            if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
+            let ty = pad.top + 4;
+
+            cCtx.fillStyle = "rgba(255,255,255,0.92)";
+            cCtx.strokeStyle = "#ccc";
+            cCtx.lineWidth = 1;
+            cCtx.beginPath();
+            cCtx.roundRect(tx, ty, tooltipW, tooltipH, 3);
+            cCtx.fill();
+            cCtx.stroke();
+
+            cCtx.font = "9px monospace";
+            cCtx.textAlign = "left";
+            cCtx.textBaseline = "top";
+            cCtx.fillStyle = "#333";
+            cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
+            cCtx.fillStyle = "#9C27B0";
+            cCtx.fillText(`Reward: ${closest.cumulative.toFixed(2)}`, tx + 4, ty + 16);
+        }
+    }
+}
+
+function renderLossChart() {
+    const chartCanvas = document.getElementById("loss-chart-canvas");
+    if (!chartCanvas) return;
+    const cCtx = chartCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = chartCanvas.getBoundingClientRect();
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    cCtx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
+
+    cCtx.fillStyle = "#fff";
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = { top: 8, right: 12, bottom: 22, left: 42 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Axis frame
+    cCtx.strokeStyle = "#ccc";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, pad.top);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.stroke();
+
+    // Y-axis label
+    cCtx.save();
+    cCtx.fillStyle = "#888";
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.translate(8, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText("Loss (Huber)", 0, 0);
+    cCtx.restore();
+
+    // X-axis label
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
+
+    if (lossHistory.length < 2) return;
+
+    // Filter to only non-zero losses (before batch_size is reached, loss is 0)
+    const nonZero = lossHistory.filter(d => d.loss > 0);
+    if (nonZero.length < 2) return;
+
+    const minTick = nonZero[0].tick;
+    const maxTick = nonZero[nonZero.length - 1].tick;
+    const tickRange = maxTick - minTick || 1;
+
+    const losses = nonZero.map(d => d.loss);
+    const yMax = Math.max(0.01, ...losses);
+
+    // Y grid & labels
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+        const frac = i / ySteps;
+        const y = pad.top + plotH - frac * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillText((frac * yMax).toFixed(3), pad.left - 4, y);
+    }
+
+    // X-axis tick labels
+    cCtx.fillStyle = "#aaa";
+    cCtx.textBaseline = "top";
+    cCtx.textAlign = "center";
+    const tickStep = Math.max(1, Math.ceil(tickRange / 5));
+    for (let t = minTick; t <= maxTick; t += tickStep) {
+        const x = pad.left + ((t - minTick) / tickRange) * plotW;
+        cCtx.fillText(t, x, pad.top + plotH + 3);
+    }
+
+    // Raw loss (faint)
+    cCtx.strokeStyle = "rgba(255, 152, 0, 0.15)";
+    cCtx.lineWidth = 0.5;
+    cCtx.beginPath();
+    for (let i = 0; i < nonZero.length; i++) {
+        const d = nonZero[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - (d.loss / yMax) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    // Rolling average
+    const WINDOW = 100;
+    const rolling = [];
+    for (let i = 0; i < losses.length; i++) {
+        const start = Math.max(0, i - WINDOW + 1);
+        let sum = 0;
+        for (let j = start; j <= i; j++) sum += losses[j];
+        rolling.push(sum / (i - start + 1));
+    }
+
+    cCtx.strokeStyle = "#FF9800";
+    cCtx.lineWidth = 2;
+    cCtx.beginPath();
+    for (let i = 0; i < nonZero.length; i++) {
+        const d = nonZero[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - (rolling[i] / yMax) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    // Hover crosshair
+    if (lossChartHoverX !== null) {
+        const hx = lossChartHoverX;
+        if (hx >= pad.left && hx <= pad.left + plotW) {
+            cCtx.strokeStyle = "rgba(0,0,0,0.3)";
+            cCtx.lineWidth = 1;
+            cCtx.setLineDash([2, 2]);
+            cCtx.beginPath();
+            cCtx.moveTo(hx, pad.top);
+            cCtx.lineTo(hx, pad.top + plotH);
+            cCtx.stroke();
+            cCtx.setLineDash([]);
+
+            const hoverTick = minTick + ((hx - pad.left) / plotW) * tickRange;
+            let closest = nonZero[0];
+            let closestIdx = 0;
+            let minDist = Infinity;
+            for (let i = 0; i < nonZero.length; i++) {
+                const dist = Math.abs(nonZero[i].tick - hoverTick);
+                if (dist < minDist) { minDist = dist; closest = nonZero[i]; closestIdx = i; }
+            }
+
+            const tooltipW = 130;
+            const tooltipH = 38;
+            let tx = hx + 8;
+            if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
+            let ty = pad.top + 4;
+
+            cCtx.fillStyle = "rgba(255,255,255,0.92)";
+            cCtx.strokeStyle = "#ccc";
+            cCtx.lineWidth = 1;
+            cCtx.beginPath();
+            cCtx.roundRect(tx, ty, tooltipW, tooltipH, 3);
+            cCtx.fill();
+            cCtx.stroke();
+
+            cCtx.font = "9px monospace";
+            cCtx.textAlign = "left";
+            cCtx.textBaseline = "top";
+            cCtx.fillStyle = "#333";
+            cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
+            cCtx.fillStyle = "#FF9800";
+            cCtx.fillText(`Loss: ${closest.loss.toFixed(4)}`, tx + 4, ty + 16);
+            cCtx.fillText(`Avg: ${rolling[closestIdx].toFixed(4)}`, tx + 4, ty + 26);
+        }
+    }
+}
+
 function renderTrajectoryChart() {
     const cv = document.getElementById("trajectory-canvas");
     if (!cv) return;
@@ -1885,10 +2263,13 @@ function updateVTESummary(agent) {
     const statusClass = vte.hesitated ? "vte-hesitating" :
                         vte.is_deliberating ? "vte-deliberating" : "vte-decided";
 
+    const vals = vte.candidates.map(c => c.value);
+    const minVal = Math.min(...vals);
+    const maxVal = Math.max(...vals);
+    const range = maxVal - minVal || 1;
+
     const candidateRows = vte.candidates.map(c => {
-        const pct = vte.candidates[0].value > 0
-            ? (c.value / vte.candidates[0].value * 100).toFixed(0)
-            : "0";
+        const pct = ((c.value - minVal) / range * 100).toFixed(0);
         const chosen = c.direction === vte.chosen ? " chosen" : "";
         return `<div class="vte-candidate${chosen}">
             <span class="dir-label">${c.direction}</span>
@@ -2102,6 +2483,32 @@ memoryChartCanvas.addEventListener("mouseleave", () => {
     memoryChartHoverX = null;
     renderMemoryChart();
 });
+
+const rewardChartCanvas = document.getElementById("reward-chart-canvas");
+if (rewardChartCanvas) {
+    rewardChartCanvas.addEventListener("mousemove", (e) => {
+        const rect = rewardChartCanvas.getBoundingClientRect();
+        rewardChartHoverX = e.clientX - rect.left;
+        renderRewardChart();
+    });
+    rewardChartCanvas.addEventListener("mouseleave", () => {
+        rewardChartHoverX = null;
+        renderRewardChart();
+    });
+}
+
+const lossChartCanvas = document.getElementById("loss-chart-canvas");
+if (lossChartCanvas) {
+    lossChartCanvas.addEventListener("mousemove", (e) => {
+        const rect = lossChartCanvas.getBoundingClientRect();
+        lossChartHoverX = e.clientX - rect.left;
+        renderLossChart();
+    });
+    lossChartCanvas.addEventListener("mouseleave", () => {
+        lossChartHoverX = null;
+        renderLossChart();
+    });
+}
 
 // --- Keyboard shortcuts ---
 document.addEventListener("keydown", (e) => {

@@ -80,6 +80,14 @@
                     <h3 class="chart-label">Memory Decay</h3>
                     <canvas id="memory-chart-canvas" height="260" aria-label="Memory decay over time chart" role="img"></canvas>
                 </div>
+                <div class="chart-container" id="reward-chart-container" style="display:none">
+                    <h3 class="chart-label">Cumulative Reward</h3>
+                    <canvas id="reward-chart-canvas" height="260" aria-label="Cumulative reward over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container" id="loss-chart-container" style="display:none">
+                    <h3 class="chart-label">Training Loss</h3>
+                    <canvas id="loss-chart-canvas" height="260" aria-label="DQN training loss over time chart" role="img"></canvas>
+                </div>
                 <details class="panel-help">
                     <summary>?</summary>
                     <dl>
@@ -91,6 +99,10 @@
                         <dd>Tracks how efficiently the agent gathers resources over time. The solid line shows cumulative resource consumptions (drive-reducing visits). The faded line shows a rolling rate (consumptions per 20 ticks). A steeper cumulative slope indicates faster resource gathering.</dd>
                         <dt>Memory Decay</dt>
                         <dd>Visualizes the Ebbinghaus forgetting curve per stimulus type. Each solid line shows mean memory strength for that stimulus (Food, Water, Light, Heat). Count (orange, dashed) shows total entries normalized to peak — drops indicate eviction events. Visited (gray, dotted) shows mean spatial familiarity across visited cells.</dd>
+                        <dt>Cumulative Reward (DQN)</dt>
+                        <dd>Shows the running sum of per-tick rewards. Reward = drive reduction from consuming resources minus a small urgency penalty. A rising curve means the agent is learning to seek resources. Only visible when using the DQN agent.</dd>
+                        <dt>Training Loss (DQN)</dt>
+                        <dd>Plots the Huber loss from DQN optimization. Raw loss is shown faintly with a rolling average overlay. Should start noisy then decrease and stabilize as Q-values converge. Only visible when using the DQN agent.</dd>
                         <dt>Cognitive Map Replay</dt>
                         <dd>Shows which stimuli the agent remembers at each grid position. Cell color indicates stimulus type; opacity indicates memory strength. Hover over the Drive chart to scrub through memory history. The orange dot marks the agent's position at that tick.</dd>
                     </dl>

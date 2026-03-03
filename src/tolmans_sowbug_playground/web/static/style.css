@@ -211,7 +211,9 @@ main {
 #drive-chart-canvas,
 #satiety-chart-canvas,
 #coverage-chart-canvas,
-#memory-chart-canvas {
+#memory-chart-canvas,
+#reward-chart-canvas,
+#loss-chart-canvas {
     width: 100%;
     background: #fff;
     border: 1px solid #eee;
@@ -222,6 +224,8 @@ main {
 #satiety-chart-canvas { height: 260px; }
 #coverage-chart-canvas { height: 260px; }
 #memory-chart-canvas { height: 260px; }
+#reward-chart-canvas { height: 260px; }
+#loss-chart-canvas { height: 260px; }
 
 #charts-area .panel-help {
     grid-column: 1 / -1;
@@ -235,17 +239,11 @@ main {
 /* ---- Sidebar (independent scroll, spans all rows) ---- */
 #sidebar {
     min-width: 0;
-    max-height: calc(100vh - 60px);
-    overflow-y: auto;
-    scrollbar-width: thin;
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
     padding-left: 0.75rem;
 }
-
-#sidebar::-webkit-scrollbar { width: 4px; }
-#sidebar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
 
 .sidebar-group {
     display: flex;

@@ -129,6 +129,91 @@ def plot_path_efficiency(
     return fig
 
 
+def plot_cumulative_reward(
+    records: list[dict], agent_index: int = 0
+) -> Figure:
+    """Plot cumulative reward over time, derived from drive reductions."""
+    ticks, _, drive_data = _extract_agent_data(records, agent_index)
+
+    rewards = []
+    cumulative = 0.0
+    for i in range(len(ticks)):
+        if i == 0:
+            rewards.append(0.0)
+            continue
+        reward = 0.0
+        for dt in drive_data:
+            prev = drive_data[dt][i - 1]
+            curr = drive_data[dt][i]
+            reduction = prev - curr
+            if reduction > 0:
+                reward += reduction
+        max_drive = max(drive_data[dt][i] for dt in drive_data)
+        reward -= 0.01 * max_drive
+        cumulative += reward
+        rewards.append(cumulative)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(ticks, rewards, color="#9C27B0", linewidth=1)
+    ax.set_xlabel("Tick")
+    ax.set_ylabel("Cumulative Reward")
+    ax.set_title("Cumulative Reward Over Time")
+    ax.axhline(y=0, color="#999", linewidth=0.5, linestyle="--")
+    plt.tight_layout()
+    return fig
+
+
+def plot_training_loss(
+    records: list[dict], window: int = 100, agent_index: int = 0
+) -> Figure:
+    """Plot DQN training loss over time with rolling average."""
+    ticks = []
+    losses = []
+
+    for record in records:
+        agents = record.get("agents", [])
+        if agent_index >= len(agents):
+            continue
+        agent = agents[agent_index]
+        loss = agent.get("training_loss")
+        if loss is not None:
+            ticks.append(record["tick"])
+            losses.append(loss)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    if not losses:
+        ax.text(0.5, 0.5, "No training loss data", transform=ax.transAxes,
+                ha="center", va="center", fontsize=14, color="#999")
+        ax.set_title("Training Loss (no data)")
+        plt.tight_layout()
+        return fig
+
+    # Raw loss (faint)
+    ax.plot(ticks, losses, color="#FF9800", alpha=0.2, linewidth=0.5)
+
+    # Rolling average
+    if len(losses) >= window:
+        rolling = []
+        rolling_ticks = []
+        for i in range(len(losses)):
+            start = max(0, i - window + 1)
+            rolling.append(sum(losses[start : i + 1]) / (i - start + 1))
+            rolling_ticks.append(ticks[i])
+        ax.plot(rolling_ticks, rolling, color="#FF9800", linewidth=1.5,
+                label=f"Rolling avg (w={window})")
+        ax.legend()
+    else:
+        ax.plot(ticks, losses, color="#FF9800", linewidth=1)
+
+    ax.set_xlabel("Tick")
+    ax.set_ylabel("Loss (Huber)")
+    ax.set_title("DQN Training Loss Over Time")
+    ax.set_ylim(bottom=0)
+    plt.tight_layout()
+    return fig
+
+
 def save_plot(fig: Figure, path: str) -> None:
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)

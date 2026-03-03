@@ -26,8 +26,8 @@ class TestDQNSowbugCreation:
         assert bug.position == (3, 7)
 
     def test_state_dim(self):
-        # 3 drives + 3 satiety + 5 passable + 5*3*3 perceptions = 56
-        assert compute_state_dim(3) == 56
+        # 3 drives + 3 satiety + 5 passable + 6 memory dir + 5*3*3 perceptions = 62
+        assert compute_state_dim(3) == 62
 
     def test_action_directions_count(self):
         assert len(ACTION_DIRECTIONS) == 5
@@ -39,7 +39,7 @@ class TestStateEncoding:
         env = Environment(width=20, height=20)
         bug.perceive(env)
         state = bug._encode_state()
-        assert state.shape == (56,)
+        assert state.shape == (62,)
         assert state.dtype == torch.float32
 
     def test_drive_levels_in_state(self):
@@ -60,7 +60,7 @@ class TestStateEncoding:
         bug.perceive(env)
         state = bug._encode_state()
         # At (0,0): NORTH blocked (y=-1), WEST blocked (x=-1)
-        # Passable indices: 6=N, 7=S, 8=E, 9=W, 10=STAY
+        # Passable indices: 6=N, 7=S, 8=E, 9=W, 10=STAY (after 3 drives + 3 satiety)
         assert state[6].item() == 0.0   # NORTH blocked
         assert state[7].item() == 1.0   # SOUTH passable
         assert state[8].item() == 1.0   # EAST passable
@@ -74,9 +74,30 @@ class TestStateEncoding:
         env.add_stimulus(food)
         bug.perceive(env)
         state = bug._encode_state()
-        # First perception slot after drives(3) + satiety(3) + passable(5) = 11
-        # FOOD is first stimulus type, first perception: intensity at index 11
-        assert state[11].item() > 0.0  # perceived intensity > 0
+        # First perception slot after drives(3) + satiety(3) + passable(5) + memory_dir(6) = 17
+        # FOOD is first stimulus type, first perception: intensity at index 17
+        assert state[17].item() > 0.0  # perceived intensity > 0
+
+    def test_memory_direction_encoded(self):
+        bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+
+        # No memories yet — direction features should be zero
+        state = bug._encode_state()
+        # Memory direction starts at index 11 (after 3+3+5), 6 dims
+        assert state[11:17].sum().item() == 0.0
+
+        # Record a food memory at (15, 10)
+        bug.memory_system.record_experience(
+            (15, 10), StimulusType.FOOD, 1.0, 1.0
+        )
+        state = bug._encode_state()
+        # HUNGER direction (indices 11, 12) should now point toward (15, 10)
+        dx = state[11].item()
+        dy = state[12].item()
+        assert dx > 0  # food is to the east (x=15 > x=5)
+        assert dy > 0  # food is to the south (y=10 > y=5)
 
     def test_zero_perceptions_padded(self):
         bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
@@ -84,7 +105,7 @@ class TestStateEncoding:
         bug.perceive(env)
         state = bug._encode_state()
         # All perception slots should be zero (no stimuli)
-        assert state[11:].sum().item() == 0.0
+        assert state[17:].sum().item() == 0.0
 
 
 class TestDecideAndAct:
@@ -140,6 +161,49 @@ class TestRewardComputation:
         assert len(bug._dqn.memory) == 1
         transition = bug._dqn.memory.buffer[0]
         # Reward should be positive (drive was reduced)
+        assert transition.reward > 0.0
+
+    def test_approach_shaping_reward(self):
+        """Moving toward perceived food when hungry gives positive shaping reward."""
+        bug = DQNSowbug(position=(5, 5), perception_radius=6.0)
+        env = Environment(width=20, height=20)
+        # Food at (5, 2) — 3 cells north, within perception radius
+        food = Stimulus(StimulusType.FOOD, (5, 2), intensity=1.0, radius=8.0)
+        env.add_stimulus(food)
+
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.8
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        bug.perceive(env)
+        bug.decide()  # saves prev_position=(5,5)
+        bug.act(Direction.NORTH, env)  # moves to (5,4), closer to food
+        bug.post_act(env)
+
+        transition = bug._dqn.memory.buffer[0]
+        # Should get positive approach shaping (moved closer to food)
+        assert transition.reward > 0.0
+
+    def test_memory_approach_shaping(self):
+        """When food is out of perception range, memory guides the agent."""
+        bug = DQNSowbug(position=(0, 5), perception_radius=3.0)
+        env = Environment(width=20, height=20)
+        # No food in environment — but agent remembers food at (10, 5)
+        bug.memory_system.record_experience(
+            (10, 5), StimulusType.FOOD, 1.0, 1.0
+        )
+
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        bug.perceive(env)
+        bug.decide()  # saves prev_position=(0,5)
+        bug.act(Direction.EAST, env)  # moves to (1,5), closer to memory
+        bug.post_act(env)
+
+        transition = bug._dqn.memory.buffer[0]
+        # Should get positive reward from memory-based approach shaping
         assert transition.reward > 0.0
 
     def test_urgency_penalty(self):

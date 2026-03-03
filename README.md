@@ -10,17 +10,26 @@ Built for researchers and devs interested in computational psychology, agent-bas
 
 ## Features
 
-**Agent with internal state** — Three drives (hunger, thirst, temperature) that rise over time and get satisfied by reaching the right stimulus. The agent perceives stimuli within a radius, remembers where it found things (cognitive map), and navigates or explores accordingly.
+**Agent with internal state** — Three drives (hunger, thirst, temperature) that rise over time and get satisfied by reaching the right stimulus. A satiety system models post-feeding refractory periods — after consuming a resource, satiety suppresses further drive growth and decays exponentially. The agent perceives stimuli within a radius, remembers where it found things (cognitive map), and navigates or explores accordingly.
 
 **Decision-making model** — When the agent knows where to go, it navigates directly. When uncertain, it engages in Vicarious Trial and Error (VTE) — mentally evaluating each direction before committing. Sometimes it hesitates. Sometimes it explores randomly. Drives compete for attention.
 
 **Realistic extinction** — When a stimulus is consumed and depleted, the agent doesn't get stuck revisiting the empty location forever. A disappointment counter tracks consecutive failed visits and accelerates memory decay exponentially — the agent persists for 2-3 visits (initial persistence), then rapidly moves on to explore elsewhere.
 
-**Interactive web UI** — Real-time canvas rendering with overlays for perception radius, cognitive map edges, KDE density heatmaps, and VTE deliberation arrows. A cumulative trajectory heatmap (KDE without decay) shows where the agent spends its time across the full run. Place/remove stimuli by clicking the grid. Adjust speed, grid size, toggle overlays, load environment presets.
+**DQN reinforcement learning agent** — An alternative to the symbolic decision-making agent, the DQN sowbug learns Q(state, action) through experience replay. The network receives a 56-dimensional state vector encoding drive levels (hunger, thirst, temperature), satiety levels, passable directions (5 binary flags), and top-k perceptions per stimulus type (food, water, light, heat, obstacle) — each perception represented as intensity, normalized direction X, and normalized direction Y. A 3-layer MLP (56 → 128 → 128 → 5) maps states to Q-values for each action (N/S/E/W/Stay). Training uses epsilon-greedy exploration, a 50k-transition replay buffer, Huber loss, and soft target network updates. The reward signal is net drive reduction minus an urgency penalty proportional to the highest current drive level.
+
+**Interactive web UI** — Real-time canvas rendering with overlays for perception radius, cognitive map edges, KDE density heatmaps, and VTE deliberation arrows. Place/remove stimuli (food, water, light, heat, obstacles) by clicking the grid. Adjust speed, grid size, toggle overlays, load environment presets. Tune agent parameters live (drive rates, satiety decay, bite size) and see the effects immediately.
+
+**Live charts** — Five time-series charts update in real time:
+- *Drives over time* — hunger, thirst, temperature levels with behavior mode band
+- *Satiety levels* — post-consumption satiety curves per drive
+- *Resource gathering* — cumulative consumptions and rolling rate
+- *Memory decay* — Ebbinghaus-style forgetting curves per stimulus type, entry count, and spatial familiarity
+- *Cognitive map replay* — miniature grid showing remembered stimuli at each position, colored by type with opacity for memory strength. Hover over the drive chart to scrub through the agent's memory history; an orange dot tracks the agent's position at the hovered tick.
 
 **Headless mode + analysis** — Run batch experiments from CLI, export to JSON/CSV, generate plots (drive levels, exploration heatmaps, learning curves).
 
-**YAML config** — Define grid size, stimulus placement, agent parameters, random seeds. Ship with presets (empty, basic foraging, choice point, light + drives).
+**YAML config** — Define grid size, stimulus placement, agent parameters, random seeds. Ships with presets (Empty, Basic Foraging, Choice Point, Light + Drives, Maze, Divided Foraging).
 
 ## Quickstart
 
@@ -55,8 +64,8 @@ uv run pytest
 ```
 src/tolmans_sowbug_playground/
 ├── core/           # simulation engine, grid world, stimulus model, config
-├── agents/         # sowbug implementation (decision logic)
-├── systems/        # drives, sensors, memory (cognitive map + KDE), motor
+├── agents/         # sowbug implementation (symbolic + DQN decision logic)
+├── systems/        # drives, sensors, memory (cognitive map + KDE), motor, DQN
 ├── analysis/       # JSON/CSV recorder, matplotlib plots
 └── web/            # FastAPI + WebSocket server, canvas UI
 configs/            # YAML experiment configs
@@ -65,7 +74,7 @@ tests/              # pytest suite
 
 ## Tech Stack
 
-Python 3.12, FastAPI, NumPy, Matplotlib, vanilla JS + HTML5 Canvas. No frontend framework. WebSocket for real-time state sync.
+Python 3.12, FastAPI, PyTorch, NumPy, Matplotlib, vanilla JS + HTML5 Canvas. No frontend framework. WebSocket for real-time state sync.
 
 ## Background
 

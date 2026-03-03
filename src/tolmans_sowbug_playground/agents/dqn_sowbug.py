@@ -38,12 +38,15 @@ STIMULUS_TYPES = [
 N_ACTIONS = len(ACTION_DIRECTIONS)
 
 
+DRIVE_TYPES = [DriveType.HUNGER, DriveType.THIRST, DriveType.TEMPERATURE]
+
+
 def compute_state_dim(perception_k: int = 3) -> int:
     """Total dimensionality of the state vector.
 
-    3 drives + 3 satiety + 5 passable + 5*k*3 perceptions
+    3 drives + 3 satiety + 5 passable + 6 memory direction + 5*k*3 perceptions
     """
-    return 3 + 3 + 5 + len(STIMULUS_TYPES) * perception_k * 3
+    return 3 + 3 + 5 + len(DRIVE_TYPES) * 2 + len(STIMULUS_TYPES) * perception_k * 3
 
 
 class DQNSowbug(Agent):
@@ -130,6 +133,7 @@ class DQNSowbug(Agent):
         # Transition bookkeeping — filled in decide(), used in post_act()
         self._prev_state: torch.Tensor | None = None
         self._prev_action: int | None = None
+        self._prev_position: tuple[int, int] = position
         self._prev_drive_levels: dict[DriveType, float] = {}
 
         # Visualization state
@@ -175,6 +179,19 @@ class DQNSowbug(Agent):
         for d in ACTION_DIRECTIONS:
             features.append(1.0 if d in self._passable_moves else 0.0)
 
+        # Best remembered direction per drive (6 dims: dx, dy per drive type)
+        # Normalized by grid diagonal so values are in roughly [-1, 1]
+        gw, gh = self._grid_size
+        diag = max((gw**2 + gh**2) ** 0.5, 1.0)
+        for dt in DRIVE_TYPES:
+            stim_type = DRIVE_STIMULUS_MAP[dt]
+            best_pos = self.memory_system.get_best_location_for(stim_type, gw, gh)
+            if best_pos is not None and best_pos != self.position:
+                features.append((best_pos[0] - self.position[0]) / diag)
+                features.append((best_pos[1] - self.position[1]) / diag)
+            else:
+                features.extend([0.0, 0.0])
+
         # Top-k perceptions per stimulus type (5 types × k × 3 dims each)
         radius = self.sensor_system.perception_radius
         for stype in STIMULUS_TYPES:
@@ -205,6 +222,7 @@ class DQNSowbug(Agent):
 
         # Save for transition in post_act
         self._prev_state = state
+        self._prev_position = self.position
         self._prev_drive_levels = dict(self.drive_system.get_levels())
 
         action_idx = self._dqn.select_action(state)
@@ -253,17 +271,73 @@ class DQNSowbug(Agent):
                     self.position, stimulus.stimulus_type, stimulus.intensity, 1.0
                 )
 
-        # Compute reward: drive reduction + urgency penalty
+        # Compute reward: drive reduction + approach shaping + urgency penalty
         current_levels = self.drive_system.get_levels()
         reward = 0.0
+
+        # Primary: reward for drive reduction, scaled by (1 - satiety).
+        # Diminishing returns: first bite when starving is highly rewarding,
+        # continued consumption while sated gives almost nothing.
+        satiety_levels = self.drive_system.get_satiety_levels()
         for dt in DriveType:
             prev = self._prev_drive_levels.get(dt, 0.0)
             curr = current_levels.get(dt, 0.0)
             reduction = prev - curr
             if reduction > 0:
-                reward += reduction
-        max_drive = max(current_levels.values()) if current_levels else 0.0
-        reward -= 0.01 * max_drive
+                satiety = satiety_levels.get(dt, 0.0)
+                reward += reduction * (1.0 - satiety)
+
+        # Shaping: reward for moving closer to the MOST URGENT drive's stimulus.
+        # Only the highest drive gets approach shaping — forces the agent to
+        # prioritize sequentially (eat → drink → seek warmth) rather than
+        # chasing whichever resource is closest.
+        radius = self.sensor_system.perception_radius
+        prev_pos = getattr(self, "_prev_position", self.position)
+        urgent = self.drive_system.get_most_urgent()
+        if urgent is not None and urgent.level >= 0.1:
+            stim_type = DRIVE_STIMULUS_MAP[urgent.drive_type]
+            drive_level = urgent.level
+            relevant = [
+                p for p in self.current_perceptions
+                if p.stimulus.stimulus_type == stim_type
+            ]
+            if relevant:
+                target = max(relevant, key=lambda p: p.perceived_intensity)
+                prev_dist = (
+                    (prev_pos[0] - target.stimulus.position[0]) ** 2
+                    + (prev_pos[1] - target.stimulus.position[1]) ** 2
+                ) ** 0.5
+                curr_dist = (
+                    (self.position[0] - target.stimulus.position[0]) ** 2
+                    + (self.position[1] - target.stimulus.position[1]) ** 2
+                ) ** 0.5
+                approach = (prev_dist - curr_dist) / max(radius, 1.0)
+                reward += 0.1 * approach * drive_level
+            else:
+                # Fallback: follow memory when the target resource isn't visible.
+                # Creates a gradient toward remembered locations even outside
+                # perception range — prevents getting stuck in perception deserts.
+                gw, gh = self._grid_size
+                best_mem = self.memory_system.get_best_location_for(
+                    stim_type, gw, gh
+                )
+                if best_mem is not None and best_mem != self.position:
+                    prev_dist = (
+                        (prev_pos[0] - best_mem[0]) ** 2
+                        + (prev_pos[1] - best_mem[1]) ** 2
+                    ) ** 0.5
+                    curr_dist = (
+                        (self.position[0] - best_mem[0]) ** 2
+                        + (self.position[1] - best_mem[1]) ** 2
+                    ) ** 0.5
+                    approach = (prev_dist - curr_dist) / max(radius, 1.0)
+                    reward += 0.05 * approach * drive_level
+
+        # Urgency penalty — quadratic so extreme drives create strong pressure
+        # to move while barely affecting behavior when drives are low.
+        # At (1.0, 1.0, 0.1): ~0.01/tick.  At (0.3, 0.2, 0.1): ~0.0007/tick.
+        total_urgency = sum(v * v for v in current_levels.values())
+        reward -= 0.005 * total_urgency
 
         # Encode next state and push transition
         next_state = self._encode_state()

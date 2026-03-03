@@ -31,9 +31,11 @@ def cmd_analyze(args):
     import json
 
     from tolmans_sowbug_playground.analysis.plots import (
+        plot_cumulative_reward,
         plot_drive_levels,
         plot_exploration_heatmap,
         plot_learning_curve,
+        plot_training_loss,
         save_plot,
     )
 
@@ -56,9 +58,17 @@ def cmd_analyze(args):
         fig = plot_learning_curve(records)
         save_plot(fig, f"{prefix}_learning.png")
         print(f"Saved: {prefix}_learning.png")
+    elif plot_type == "reward":
+        fig = plot_cumulative_reward(records)
+        save_plot(fig, f"{prefix}_reward.png")
+        print(f"Saved: {prefix}_reward.png")
+    elif plot_type == "loss":
+        fig = plot_training_loss(records)
+        save_plot(fig, f"{prefix}_loss.png")
+        print(f"Saved: {prefix}_loss.png")
     else:
         print(f"Unknown plot type: {plot_type}")
-        print("Available: drives, heatmap, learning")
+        print("Available: drives, heatmap, learning, reward, loss")
         sys.exit(1)
 
 
