@@ -1,6 +1,8 @@
 import asyncio
+import copy
 import json
 from pathlib import Path
+import uuid
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -123,17 +125,78 @@ PRESETS: dict[str, dict] = {
 
 app = FastAPI(title="Schematic Sowbug")
 
-# Simulation state
-_simulation: Simulation | None = None
-_config: SimulationConfig | None = None
-_running = False
-_speed = 5  # ticks per second
+# Base configuration used to seed each websocket session.
+_base_config: SimulationConfig | None = None
+MODEL_DIR = Path("results") / "models"
 
 
-def _init_simulation():
-    global _simulation
-    if _config is not None:
-        _simulation = build_simulation(_config)
+def _clone_config(config: SimulationConfig | None) -> SimulationConfig | None:
+    if config is None:
+        return None
+    return copy.deepcopy(config)
+
+
+def _init_simulation(config: SimulationConfig | None) -> Simulation | None:
+    if config is None:
+        return None
+    return build_simulation(config)
+
+
+def _stimulus_configs_from_sim(simulation: Simulation) -> list[StimulusConfig]:
+    return [
+        StimulusConfig(
+            stimulus_type=s.stimulus_type.value,
+            position=tuple(s.position),
+            intensity=s.intensity,
+            radius=s.radius,
+            quantity=s.quantity,
+        )
+        for s in simulation.environment.stimuli
+    ]
+
+
+async def _send_event(
+    ws: WebSocket,
+    event_type: str,
+    action: str | None = None,
+    request_id: str | None = None,
+    message: str | None = None,
+    payload: dict | None = None,
+) -> None:
+    envelope: dict = {"type": event_type}
+    if action is not None:
+        envelope["action"] = action
+    if request_id is not None:
+        envelope["request_id"] = request_id
+    if message is not None:
+        envelope["message"] = message
+    if payload is not None:
+        envelope["payload"] = payload
+    await ws.send_text(json.dumps(_make_json_safe(envelope)))
+
+
+async def _send_state(
+    ws: WebSocket,
+    simulation: Simulation | None,
+    running: bool,
+    speed: int,
+    session_id: str,
+) -> None:
+    if simulation is None:
+        return
+    await ws.send_text(
+        json.dumps(
+            _make_json_safe(
+                {
+                    "type": "state",
+                    "session_id": session_id,
+                    "running": running,
+                    "speed": speed,
+                    "state": simulation.get_state(),
+                }
+            )
+        )
+    )
 
 
 @app.get("/")
@@ -144,43 +207,94 @@ async def index():
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    global _running, _speed, _simulation
     await ws.accept()
+    session_id = uuid.uuid4().hex[:8]
+    running = False
+    speed = 5
+    config = _clone_config(_base_config)
+    simulation = _init_simulation(config)
 
-    if _simulation is None:
-        _init_simulation()
+    await _send_event(
+        ws,
+        "status",
+        action="connect",
+        message=f"Session {session_id} connected.",
+        payload={"session_id": session_id},
+    )
+    await _send_state(ws, simulation, running, speed, session_id)
 
     try:
         while True:
-            # Check for control messages (non-blocking)
+            action = None
+            request_id = None
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=0.01)
                 data = json.loads(msg)
                 action = data.get("action")
+                request_id = data.get("request_id")
                 if action == "play":
-                    _running = True
+                    running = True
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message="Simulation running.",
+                    )
                 elif action == "pause":
-                    _running = False
+                    running = False
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message="Simulation paused.",
+                    )
                 elif action == "step":
-                    if _simulation:
-                        _simulation.step()
-                        await ws.send_text(
-                            json.dumps(_make_json_safe(_simulation.get_state()))
+                    if running:
+                        await _send_event(
+                            ws,
+                            "error",
+                            action=action,
+                            request_id=request_id,
+                            message="Cannot step while running. Pause first.",
                         )
+                    elif simulation:
+                        simulation.step()
+                        await _send_event(
+                            ws,
+                            "ack",
+                            action=action,
+                            request_id=request_id,
+                            message="Step completed.",
+                        )
+                        await _send_state(ws, simulation, running, speed, session_id)
                 elif action == "speed":
-                    _speed = max(1, min(60, data.get("value", 5)))
+                    speed = max(1, min(60, data.get("value", 5)))
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message=f"Speed set to {speed} tps.",
+                    )
                 elif action == "reset":
-                    _init_simulation()
-                    if _simulation:
-                        await ws.send_text(
-                            json.dumps(_make_json_safe(_simulation.get_state()))
-                        )
+                    running = False
+                    simulation = _init_simulation(config)
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message="Simulation reset and paused.",
+                    )
+                    await _send_state(ws, simulation, running, speed, session_id)
                 elif action == "add_stimulus":
-                    if _simulation:
+                    if simulation:
                         from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 
                         stim_type = StimulusType(data["stimulus_type"])
-                        _simulation.environment.add_stimulus(
+                        simulation.environment.add_stimulus(
                             Stimulus(
                                 stimulus_type=stim_type,
                                 position=tuple(data["position"]),
@@ -189,49 +303,61 @@ async def websocket_endpoint(ws: WebSocket):
                                 quantity=data.get("quantity"),
                             )
                         )
-                        if not _running:
-                            await ws.send_text(
-                                json.dumps(
-                                    _make_json_safe(_simulation.get_state())
-                                )
-                            )
+                        if config is not None:
+                            config.stimuli = _stimulus_configs_from_sim(simulation)
+                        await _send_event(
+                            ws,
+                            "ack",
+                            action=action,
+                            request_id=request_id,
+                            message="Stimulus added.",
+                        )
+                        if not running:
+                            await _send_state(ws, simulation, running, speed, session_id)
                 elif action == "remove_stimulus":
-                    if _simulation:
+                    if simulation:
                         pos = tuple(data["position"])
-                        matches = _simulation.environment.get_stimuli_at(pos)
+                        matches = simulation.environment.get_stimuli_at(pos)
                         for s in matches:
-                            _simulation.environment.remove_stimulus(s)
-                        if matches and not _running:
-                            await ws.send_text(
-                                json.dumps(
-                                    _make_json_safe(_simulation.get_state())
-                                )
-                            )
+                            simulation.environment.remove_stimulus(s)
+                        if config is not None:
+                            config.stimuli = _stimulus_configs_from_sim(simulation)
+                        await _send_event(
+                            ws,
+                            "ack",
+                            action=action,
+                            request_id=request_id,
+                            message=f"Removed {len(matches)} stimuli.",
+                        )
+                        if matches and not running:
+                            await _send_state(ws, simulation, running, speed, session_id)
                 elif action == "resize":
                     width = max(5, min(100, data.get("width", 20)))
                     height = max(5, min(100, data.get("height", 20)))
-                    if _config is not None:
-                        _config.grid_width = width
-                        _config.grid_height = height
-                        ax = min(_config.agent.position[0], width - 1)
-                        ay = min(_config.agent.position[1], height - 1)
-                        _config.agent.position = (ax, ay)
-                    _running = False
-                    _init_simulation()
-                    if _simulation:
-                        await ws.send_text(
-                            json.dumps(
-                                _make_json_safe(_simulation.get_state())
-                            )
-                        )
+                    if config is not None:
+                        config.grid_width = width
+                        config.grid_height = height
+                        ax = min(config.agent.position[0], width - 1)
+                        ay = min(config.agent.position[1], height - 1)
+                        config.agent.position = (ax, ay)
+                    running = False
+                    simulation = _init_simulation(config)
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message=f"Resized map to {width}x{height}; paused.",
+                    )
+                    await _send_state(ws, simulation, running, speed, session_id)
                 elif action == "load_preset":
                     preset_name = data.get("preset", "")
                     preset = PRESETS.get(preset_name)
-                    if preset and _config is not None:
-                        _config.grid_width = preset["grid_width"]
-                        _config.grid_height = preset["grid_height"]
-                        _config.agent.position = preset["agent_position"]
-                        _config.stimuli = [
+                    if preset and config is not None:
+                        config.grid_width = preset["grid_width"]
+                        config.grid_height = preset["grid_height"]
+                        config.agent.position = preset["agent_position"]
+                        config.stimuli = [
                             StimulusConfig(
                                 stimulus_type=s["type"],
                                 position=tuple(s["position"]),
@@ -241,17 +367,27 @@ async def websocket_endpoint(ws: WebSocket):
                             )
                             for s in preset["stimuli"]
                         ]
-                        _running = False
-                        _init_simulation()
-                        if _simulation:
-                            await ws.send_text(
-                                json.dumps(
-                                    _make_json_safe(_simulation.get_state())
-                                )
-                            )
+                        running = False
+                        simulation = _init_simulation(config)
+                        await _send_event(
+                            ws,
+                            "ack",
+                            action=action,
+                            request_id=request_id,
+                            message=f'Preset "{preset_name}" loaded; paused.',
+                        )
+                        await _send_state(ws, simulation, running, speed, session_id)
+                    else:
+                        await _send_event(
+                            ws,
+                            "error",
+                            action=action,
+                            request_id=request_id,
+                            message=f'Unknown preset "{preset_name}".',
+                        )
                 elif action == "update_params":
-                    if _simulation and _simulation.agents:
-                        agent = _simulation.agents[0]
+                    if simulation and simulation.agents:
+                        agent = simulation.agents[0]
                         param = data.get("param")
                         value = float(data.get("value", 0))
                         drives = agent.drive_system.drives
@@ -267,11 +403,20 @@ async def websocket_endpoint(ws: WebSocket):
                                 d.satiety_decay_rate = value
                         elif param == "bite_size":
                             agent.bite_size = value
+                        if config is not None:
+                            config.agent.params[param] = value
+                        await _send_event(
+                            ws,
+                            "ack",
+                            action=action,
+                            request_id=request_id,
+                            message=f"Parameter {param} set to {value}.",
+                        )
                 elif action == "save_preset":
                     preset_name = data.get("name", "").strip()
-                    if preset_name and _simulation and _config:
+                    if preset_name and simulation and config:
                         stimuli_list = []
-                        for s in _simulation.environment.stimuli:
+                        for s in simulation.environment.stimuli:
                             entry = {
                                 "type": s.stimulus_type.value,
                                 "position": s.position,
@@ -282,26 +427,89 @@ async def websocket_endpoint(ws: WebSocket):
                                 entry["quantity"] = s.quantity
                             stimuli_list.append(entry)
                         PRESETS[preset_name] = {
-                            "grid_width": _config.grid_width,
-                            "grid_height": _config.grid_height,
-                            "agent_position": _config.agent.position,
+                            "grid_width": config.grid_width,
+                            "grid_height": config.grid_height,
+                            "agent_position": config.agent.position,
                             "stimuli": stimuli_list,
                         }
-                        await ws.send_text(
-                            json.dumps({
+                        await _send_event(
+                            ws,
+                            "ack",
+                            action=action,
+                            request_id=request_id,
+                            message=f'Preset "{preset_name}" saved.',
+                            payload={
                                 "preset_saved": preset_name,
                                 "presets": list(PRESETS.keys()),
-                            })
+                            },
                         )
+                    else:
+                        await _send_event(
+                            ws,
+                            "error",
+                            action=action,
+                            request_id=request_id,
+                            message="Preset name is required.",
+                        )
+                elif action == "save_model":
+                    if simulation and simulation.agents:
+                        agent = simulation.agents[0]
+                        if not hasattr(agent, "save_model"):
+                            await _send_event(
+                                ws,
+                                "error",
+                                action=action,
+                                request_id=request_id,
+                                message="Current agent does not support model checkpoints.",
+                            )
+                        else:
+                            tick = simulation.tick_count
+                            requested_name = str(data.get("name", "")).strip()
+                            safe_name = requested_name.replace("/", "_").replace("\\", "_")
+                            filename = (
+                                f"{safe_name}.pt"
+                                if safe_name
+                                else f"sowbug_tick{tick}.pt"
+                            )
+                            session_dir = MODEL_DIR / session_id
+                            session_dir.mkdir(parents=True, exist_ok=True)
+                            model_path = session_dir / filename
+                            agent.save_model(model_path)
+                            await _send_event(
+                                ws,
+                                "ack",
+                                action=action,
+                                request_id=request_id,
+                                message=f"Model checkpoint saved at tick {tick}.",
+                                payload={
+                                    "model_saved": str(model_path),
+                                    "model_saved_tick": tick,
+                                    "model_session": session_id,
+                                },
+                            )
+                else:
+                    await _send_event(
+                        ws,
+                        "error",
+                        action=action,
+                        request_id=request_id,
+                        message=f"Unknown action: {action}",
+                    )
             except asyncio.TimeoutError:
                 pass
+            except Exception as exc:
+                await _send_event(
+                    ws,
+                    "error",
+                    action=action if "action" in locals() else None,
+                    request_id=request_id if "request_id" in locals() else None,
+                    message=str(exc),
+                )
 
-            # Run simulation if playing
-            if _running and _simulation:
-                _simulation.step()
-                state = _simulation.get_state()
-                await ws.send_text(json.dumps(_make_json_safe(state)))
-                await asyncio.sleep(1.0 / _speed)
+            if running and simulation:
+                simulation.step()
+                await _send_state(ws, simulation, running, speed, session_id)
+                await asyncio.sleep(1.0 / speed)
             else:
                 await asyncio.sleep(0.05)
 
@@ -314,6 +522,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def start_server(config: SimulationConfig | None = None, port: int = 8000):
-    global _config
-    _config = config
+    global _base_config
+    _base_config = config
     uvicorn.run(app, host="0.0.0.0", port=port)

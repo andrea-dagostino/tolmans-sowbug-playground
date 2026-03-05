@@ -1,5 +1,8 @@
 import tempfile
+import random
 
+import numpy as np
+import torch
 import yaml
 
 from tolmans_sowbug_playground.core.config import SimulationConfig, load_config, build_simulation
@@ -69,3 +72,25 @@ class TestBuildSimulation:
         assert len(sim.agents) == 1
         assert sim.max_ticks == 1000
         assert len(sim.environment.stimuli) == 4
+
+    def test_build_reseeds_python_numpy_and_torch(self):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False
+        ) as f:
+            yaml.dump(VALID_CONFIG, f)
+            path = f.name
+        config = load_config(path)
+
+        build_simulation(config)
+        py_1 = random.random()
+        np_1 = float(np.random.rand())
+        torch_1 = float(torch.rand(1).item())
+
+        build_simulation(config)
+        py_2 = random.random()
+        np_2 = float(np.random.rand())
+        torch_2 = float(torch.rand(1).item())
+
+        assert py_1 == py_2
+        assert np_1 == np_2
+        assert torch_1 == torch_2

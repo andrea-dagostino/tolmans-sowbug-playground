@@ -43,12 +43,177 @@ let rewardHistory = [];
 let lossHistory = [];
 let rewardChartHoverX = null;
 let lossChartHoverX = null;
+let rewardComponentsHistory = [];
+let rewardComponentsHoverX = null;
 let _cumulativeReward = 0;
 let eventLog = [];
 let _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
 let _firstDeliberation = false;
 let hoveredStimulus = null;
 let hoverPixel = { x: 0, y: 0 };
+let _pendingChartRender = false;
+let _renderScheduled = false;
+let _lastDashboardTick = -1;
+let _isRunning = false;
+let _isConnected = false;
+let _connectionState = "connecting";
+let _fidelityMode = "auto";
+let _requestCounter = 0;
+
+let _ingestFrames = 0;
+let _chartRenders = 0;
+let _chartSkipped = 0;
+let _lastPerfSampleMs = performance.now();
+let _lastIngestFrames = 0;
+let _lastChartRenders = 0;
+
+const HISTORY_LIMITS = {
+    resource: 5000,
+    drive: 5000,
+    position: 4000,
+    memory: 2500,
+    cogMap: 1200,
+    reward: 5000,
+    rewardComponents: 5000,
+    loss: 5000,
+    events: 600,
+};
+
+function pushBounded(arr, value, maxLen) {
+    arr.push(value);
+    if (arr.length > maxLen) {
+        arr.splice(0, arr.length - maxLen);
+    }
+}
+
+function getCoreSampleStride(tick) {
+    if (_fidelityMode === "high") return 1;
+    if (_fidelityMode === "low") return tick < 8000 ? 2 : 6;
+    if (tick < 4000) return 1;
+    if (tick < 10000) return 2;
+    return 4;
+}
+
+function getTrajectorySampleStride(tick) {
+    if (_fidelityMode === "high") return 1;
+    if (_fidelityMode === "low") return tick < 8000 ? 3 : 8;
+    if (tick < 3000) return 1;
+    if (tick < 10000) return 2;
+    return 5;
+}
+
+function getMemorySampleStride(tick) {
+    if (_fidelityMode === "high") return 2;
+    if (_fidelityMode === "low") return tick < 8000 ? 6 : 12;
+    if (tick < 3000) return 2;
+    if (tick < 10000) return 4;
+    return 8;
+}
+
+function getChartRenderStride(tick) {
+    if (_fidelityMode === "high") return 1;
+    if (_fidelityMode === "low") return tick < 8000 ? 3 : 6;
+    if (tick < 3000) return 1;
+    if (tick < 10000) return 2;
+    return 4;
+}
+
+function setCommandFeedback(text) {
+    const el = document.getElementById("command-feedback");
+    if (el) el.textContent = text;
+}
+
+function setConnectionState(next) {
+    _connectionState = next;
+    const badge = document.getElementById("conn-state-badge");
+    if (!badge) return;
+    badge.className = `state-badge state-${next}`;
+    badge.textContent =
+        next === "live"
+            ? "Live"
+            : next === "reconnecting"
+              ? "Reconnecting"
+              : next === "offline"
+                ? "Offline"
+                : "Connecting";
+}
+
+function setRunState(running, stepping = false) {
+    _isRunning = !!running;
+    const runBadge = document.getElementById("run-state-badge");
+    if (runBadge) {
+        const stateClass = stepping ? "state-stepping" : (_isRunning ? "state-running" : "state-paused");
+        runBadge.className = `state-badge ${stateClass}`;
+        runBadge.textContent = stepping ? "Stepping" : (_isRunning ? "Running" : "Paused");
+    }
+    const placeSection = document.getElementById("place-section");
+    const hint = document.getElementById("edit-hint");
+    if (placeSection) placeSection.classList.toggle("editing-disabled", _isRunning);
+    if (hint) hint.textContent = _isRunning ? "Pause to edit" : "L-click place / R-click remove";
+
+    const btnPlay = document.getElementById("btn-play");
+    const btnPause = document.getElementById("btn-pause");
+    const btnStep = document.getElementById("btn-step");
+    if (btnPlay) btnPlay.disabled = !_isConnected || _isRunning;
+    if (btnPause) btnPause.disabled = !_isConnected || !_isRunning;
+    if (btnStep) btnStep.disabled = !_isConnected || _isRunning;
+}
+
+function canEditMap() {
+    return _isConnected && !_isRunning;
+}
+
+function nextRequestId() {
+    _requestCounter += 1;
+    return `req_${_requestCounter}`;
+}
+
+function updatePerfTelemetry() {
+    const now = performance.now();
+    const elapsed = now - _lastPerfSampleMs;
+    if (elapsed < 1000) return;
+    const ingestPerSec = ((_ingestFrames - _lastIngestFrames) * 1000) / elapsed;
+    const chartPerSec = ((_chartRenders - _lastChartRenders) * 1000) / elapsed;
+    const ingestEl = document.getElementById("perf-ingest");
+    const chartEl = document.getElementById("perf-chart");
+    const skipEl = document.getElementById("perf-skip");
+    if (ingestEl) ingestEl.textContent = `Ingest: ${ingestPerSec.toFixed(1)}/s`;
+    if (chartEl) chartEl.textContent = `Charts: ${chartPerSec.toFixed(1)}/s`;
+    if (skipEl) skipEl.textContent = `Skipped: ${_chartSkipped}`;
+    _lastPerfSampleMs = now;
+    _lastIngestFrames = _ingestFrames;
+    _lastChartRenders = _chartRenders;
+}
+
+function scheduleFrameRender() {
+    if (_renderScheduled) return;
+    _renderScheduled = true;
+    requestAnimationFrame(() => {
+        _renderScheduled = false;
+        if (!latestState) return;
+        render(latestState);
+        const tick = latestState.tick || 0;
+        const dashboardStride = tick < 10000 ? 1 : 2;
+        if (tick - _lastDashboardTick >= dashboardStride) {
+            updateDashboard(latestState);
+            _lastDashboardTick = tick;
+        }
+        if (_pendingChartRender) {
+            renderChart();
+            renderDriveChart();
+            renderSatietyChart();
+            renderMemoryChart();
+            renderTrajectoryChart();
+            renderRewardComponentsChart();
+            renderRewardChart();
+            renderLossChart();
+            renderCogMapReplay();
+            _chartRenders += 1;
+            _pendingChartRender = false;
+        }
+        updatePerfTelemetry();
+    });
+}
 
 // Exponential moving average for chart line smoothing
 function smoothArray(arr, alpha = 0.15) {
@@ -92,26 +257,72 @@ function syncTrajectoryHeight() {
     const tc = document.getElementById("trajectory-container");
     if (gc && tc) tc.style.height = gc.offsetHeight + "px";
 }
+window.addEventListener("resize", syncTrajectoryHeight);
 
 function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${protocol}//${location.host}/ws`);
+    setConnectionState("connecting");
 
     ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
+        _ingestFrames += 1;
 
-        // Handle preset_saved response
-        if (msg.preset_saved) {
-            const sel = document.getElementById("preset-select");
-            // Rebuild options: Custom + all presets from server
-            const presets = msg.presets || [];
-            sel.innerHTML = '<option value="">Custom</option>' +
-                presets.map(p => `<option value="${p}">${p}</option>`).join("");
-            sel.value = msg.preset_saved;
+        if (msg.type === "ack") {
+            const payload = msg.payload || {};
+            const action = msg.action || "command";
+            if (action === "save_preset" && payload.preset_saved) {
+                const sel = document.getElementById("preset-select");
+                const presets = payload.presets || [];
+                sel.innerHTML =
+                    '<option value="">Custom</option>' +
+                    presets.map((p) => `<option value="${p}">${p}</option>`).join("");
+                sel.value = payload.preset_saved;
+            }
+            if (action === "save_model" && payload.model_saved) {
+                const status = document.getElementById("model-save-status");
+                if (status) {
+                    const tick = payload.model_saved_tick != null ? `t${payload.model_saved_tick}` : "saved";
+                    status.textContent = `${tick}: ${payload.model_saved}`;
+                    status.title = payload.model_saved;
+                }
+            }
+            setCommandFeedback(msg.message || `${action} applied`);
             return;
         }
 
-        latestState = msg;
+        if (msg.type === "error") {
+            if (msg.action === "save_model") {
+                const status = document.getElementById("model-save-status");
+                if (status) {
+                    status.textContent = `Save failed: ${msg.message}`;
+                    status.title = msg.message;
+                }
+            }
+            setCommandFeedback(`Error: ${msg.message || "Command failed"}`);
+            return;
+        }
+
+        if (msg.type === "status") {
+            setCommandFeedback(msg.message || "Status update");
+            return;
+        }
+
+        let stateMessage = null;
+        if (msg.type === "state") {
+            stateMessage = msg.state;
+            setRunState(!!msg.running, false);
+            if (msg.speed != null) {
+                speedSlider.value = String(msg.speed);
+                speedVal.textContent = String(msg.speed);
+            }
+        } else if (msg.tick !== undefined && msg.agents) {
+            // Backward compatibility with legacy raw state payload.
+            stateMessage = msg;
+        }
+
+        if (!stateMessage) return;
+        latestState = stateMessage;
         if (latestState.grid_width && latestState.grid_height) {
             if (latestState.grid_width !== gridWidth || latestState.grid_height !== gridHeight) {
                 updateCanvasSize(latestState.grid_width, latestState.grid_height);
@@ -130,17 +341,25 @@ function connectWebSocket() {
             cogMapHistory = [];
             rewardHistory = [];
             lossHistory = [];
+            rewardComponentsHistory = [];
             _cumulativeReward = 0;
             _peakMemoryCount = 0;
             eventLog = [];
             _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
             _firstDeliberation = false;
+            _lastDashboardTick = -1;
+            _chartSkipped = 0;
         }
         lastRecordedTick = tick;
+        const coreSampleStride = getCoreSampleStride(tick);
+        const trajectorySampleStride = getTrajectorySampleStride(tick);
+        const memorySampleStride = getMemorySampleStride(tick);
         if (latestState.agents && latestState.agents.length > 0) {
             const agent = latestState.agents[0];
             const consumptions = agent.resource_consumptions != null ? agent.resource_consumptions : 0;
-            resourceHistory.push({ tick, consumptions });
+            if (tick % coreSampleStride === 0) {
+                pushBounded(resourceHistory, { tick, consumptions }, HISTORY_LIMITS.resource);
+            }
 
             // Track drive levels
             const drives = agent.drive_levels || {};
@@ -159,36 +378,42 @@ function connectWebSocket() {
                 else if (kl.includes("temperature")) entry.sat_temperature = v;
             }
             entry.decision_reason = agent.decision_reason || "idle";
-            driveHistory.push(entry);
+            if (tick % coreSampleStride === 0) {
+                pushBounded(driveHistory, entry, HISTORY_LIMITS.drive);
+            }
 
             // Track position, drive level and frustration for trajectory chart
             const [px, py] = agent.position;
             const maxDrive = Math.max(entry.hunger, entry.thirst, entry.temperature);
             const frustration = agent.frustration_level || 0;
-            positionHistory.push({ tick, x: px, y: py, drive: maxDrive, frustration });
+            if (tick % trajectorySampleStride === 0) {
+                pushBounded(
+                    positionHistory,
+                    { tick, x: px, y: py, drive: maxDrive, frustration },
+                    HISTORY_LIMITS.position
+                );
+            }
 
             // Detect events for chart annotations
-            if (driveHistory.length > 1) {
-                const prev = _lastDrives;
-                const DROP_THRESHOLD = 0.15;
-                if (prev.hunger - entry.hunger > DROP_THRESHOLD) {
-                    const exists = eventLog.some(e => e.label === "Food found" && Math.abs(e.tick - tick) < 3);
-                    if (!exists) eventLog.push({ tick, label: "Food found" });
-                }
-                if (prev.thirst - entry.thirst > DROP_THRESHOLD) {
-                    const exists = eventLog.some(e => e.label === "Water found" && Math.abs(e.tick - tick) < 3);
-                    if (!exists) eventLog.push({ tick, label: "Water found" });
-                }
-                if (prev.temperature - entry.temperature > DROP_THRESHOLD) {
-                    const exists = eventLog.some(e => e.label === "Heat found" && Math.abs(e.tick - tick) < 3);
-                    if (!exists) eventLog.push({ tick, label: "Heat found" });
-                }
+            const prev = _lastDrives;
+            const DROP_THRESHOLD = 0.15;
+            if (prev.hunger - entry.hunger > DROP_THRESHOLD) {
+                const exists = eventLog.some(e => e.label === "Food found" && Math.abs(e.tick - tick) < 3);
+                if (!exists) pushBounded(eventLog, { tick, label: "Food found" }, HISTORY_LIMITS.events);
+            }
+            if (prev.thirst - entry.thirst > DROP_THRESHOLD) {
+                const exists = eventLog.some(e => e.label === "Water found" && Math.abs(e.tick - tick) < 3);
+                if (!exists) pushBounded(eventLog, { tick, label: "Water found" }, HISTORY_LIMITS.events);
+            }
+            if (prev.temperature - entry.temperature > DROP_THRESHOLD) {
+                const exists = eventLog.some(e => e.label === "Heat found" && Math.abs(e.tick - tick) < 3);
+                if (!exists) pushBounded(eventLog, { tick, label: "Heat found" }, HISTORY_LIMITS.events);
             }
             _lastDrives = { hunger: entry.hunger, thirst: entry.thirst, temperature: entry.temperature };
 
             if (!_firstDeliberation && agent.vte && agent.vte.is_deliberating) {
                 _firstDeliberation = true;
-                eventLog.push({ tick, label: "First VTE" });
+                pushBounded(eventLog, { tick, label: "First VTE" }, HISTORY_LIMITS.events);
             }
 
             // Track memory decay metrics (per stimulus type)
@@ -219,63 +444,119 @@ function connectWebSocket() {
                 avgFamiliarity = sum / visitedValues.length;
             }
 
-            memoryHistory.push({
-                tick, normalizedCount, avgFamiliarity,
-                str_food:  stimCounts.food  > 0 ? stimSums.food  / stimCounts.food  : 0,
-                str_water: stimCounts.water > 0 ? stimSums.water / stimCounts.water : 0,
-                str_light: stimCounts.light > 0 ? stimSums.light / stimCounts.light : 0,
-                str_heat:  stimCounts.heat  > 0 ? stimSums.heat  / stimCounts.heat  : 0,
-            });
-
-            cogMapHistory.push({ tick, cells: compactCogMapSnapshot(cogMap) });
+            if (tick % memorySampleStride === 0) {
+                pushBounded(
+                    memoryHistory,
+                    {
+                        tick, normalizedCount, avgFamiliarity,
+                        str_food:  stimCounts.food  > 0 ? stimSums.food  / stimCounts.food  : 0,
+                        str_water: stimCounts.water > 0 ? stimSums.water / stimCounts.water : 0,
+                        str_light: stimCounts.light > 0 ? stimSums.light / stimCounts.light : 0,
+                        str_heat:  stimCounts.heat  > 0 ? stimSums.heat  / stimCounts.heat  : 0,
+                    },
+                    HISTORY_LIMITS.memory
+                );
+                pushBounded(
+                    cogMapHistory,
+                    { tick, cells: compactCogMapSnapshot(cogMap) },
+                    HISTORY_LIMITS.cogMap
+                );
+            }
 
             // DQN-specific: track cumulative reward and training loss
             if (agent.training_loss !== undefined) {
-                // Show DQN chart containers
-                const rc = document.getElementById("reward-chart-container");
-                const lc = document.getElementById("loss-chart-container");
-                if (rc) rc.style.display = "";
-                if (lc) lc.style.display = "";
-
-                // Compute per-tick reward from drive changes
-                let tickReward = 0;
-                if (driveHistory.length >= 2) {
-                    const prev = driveHistory[driveHistory.length - 2];
-                    const curr = driveHistory[driveHistory.length - 1];
-                    for (const key of ["hunger", "thirst", "temperature"]) {
-                        const reduction = prev[key] - curr[key];
-                        if (reduction > 0) tickReward += reduction;
-                    }
-                    const maxDrive = Math.max(curr.hunger, curr.thirst, curr.temperature);
-                    tickReward -= 0.01 * maxDrive;
-                }
+                const rewardComponents = agent.reward_components || {};
+                const driveReduction = rewardComponents.drive_reduction || 0;
+                const shaping = rewardComponents.shaping || 0;
+                const urgencyPenalty = rewardComponents.urgency_penalty || 0;
+                const offTargetPenalty = rewardComponents.off_target_penalty || 0;
+                const urgentExploreBonus = rewardComponents.urgent_explore_bonus || 0;
+                const urgentExplorePenalty = rewardComponents.urgent_explore_penalty || 0;
+                const tickReward =
+                    agent.reward_total !== undefined
+                        ? agent.reward_total
+                        : driveReduction +
+                          shaping -
+                          urgencyPenalty -
+                          offTargetPenalty +
+                          urgentExploreBonus -
+                          urgentExplorePenalty;
                 _cumulativeReward += tickReward;
-                rewardHistory.push({ tick, cumulative: _cumulativeReward });
-
-                lossHistory.push({ tick, loss: agent.training_loss || 0 });
+                if (tick % coreSampleStride === 0) {
+                    pushBounded(
+                        rewardHistory,
+                        { tick, cumulative: _cumulativeReward },
+                        HISTORY_LIMITS.reward
+                    );
+                    pushBounded(
+                        rewardComponentsHistory,
+                        {
+                            tick,
+                            drive_reduction: driveReduction,
+                            shaping,
+                            urgency_penalty: urgencyPenalty,
+                            off_target_penalty: offTargetPenalty,
+                            urgent_explore_bonus: urgentExploreBonus,
+                            urgent_explore_penalty: urgentExplorePenalty,
+                            total: tickReward,
+                        },
+                        HISTORY_LIMITS.rewardComponents
+                    );
+                    pushBounded(
+                        lossHistory,
+                        { tick, loss: agent.training_loss || 0 },
+                        HISTORY_LIMITS.loss
+                    );
+                }
             }
         }
-        renderChart();
-        renderDriveChart();
-        renderSatietyChart();
-        renderMemoryChart();
-        renderTrajectoryChart();
-        renderRewardChart();
-        renderLossChart();
-        renderCogMapReplay();
+        const chartStride = getChartRenderStride(tick);
+        const hovering =
+            driveChartHoverX !== null ||
+            satietyChartHoverX !== null ||
+            resourceChartHoverX !== null ||
+            memoryChartHoverX !== null ||
+            rewardChartHoverX !== null ||
+            rewardComponentsHoverX !== null ||
+            lossChartHoverX !== null;
+        if (hovering || tick % chartStride === 0) {
+            _pendingChartRender = true;
+        } else {
+            _chartSkipped += 1;
+        }
+        scheduleFrameRender();
+    };
 
-        render(latestState);
-        updateDashboard(latestState);
+    ws.onopen = () => {
+        _isConnected = true;
+        setConnectionState("live");
+        setCommandFeedback("Connected.");
+        setRunState(_isRunning, false);
     };
 
     ws.onclose = () => {
+        _isConnected = false;
+        setConnectionState("reconnecting");
+        setRunState(false, false);
+        setCommandFeedback("Connection lost. Reconnecting…");
         setTimeout(connectWebSocket, 2000);
+    };
+
+    ws.onerror = () => {
+        _isConnected = false;
+        setConnectionState("offline");
+        setRunState(false, false);
+        setCommandFeedback("WebSocket error. Waiting to reconnect…");
     };
 }
 
 function send(data) {
+    const payload = { ...data };
+    if (!payload.request_id) payload.request_id = nextRequestId();
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
+        ws.send(JSON.stringify(payload));
+    } else {
+        setCommandFeedback(`Dropped command: ${data.action || "unknown"} (offline)`);
     }
 }
 
@@ -995,28 +1276,38 @@ function renderSatietyChart() {
         cCtx.fillText(t, x, pad.top + plotH + 3);
     }
 
-    const series = [
-        { key: "sat_hunger",      color: "#4CAF50", label: "Hunger",  dash: [],     lineWidth: 2 },
-        { key: "sat_thirst",      color: "#2196F3", label: "Thirst",  dash: [6, 3], lineWidth: 2 },
-        { key: "sat_temperature", color: "#F44336", label: "Temp",    dash: [2, 2], lineWidth: 2 },
-    ];
+    // Satisfaction = combined satiety across all drives (mean),
+    // then smoothed as a rolling-style EMA for a stable proxy metric.
+    const combinedSatiety = driveHistory.map(
+        (d) => (d.sat_hunger + d.sat_thirst + d.sat_temperature) / 3
+    );
+    const smoothed = smoothArray(combinedSatiety, 0.08);
 
-    for (const s of series) {
-        const smoothed = smoothArray(driveHistory.map(d => d[s.key]));
-        cCtx.strokeStyle = s.color;
-        cCtx.lineWidth = s.lineWidth || 2;
-        cCtx.setLineDash(s.dash);
-        cCtx.beginPath();
-        for (let i = 0; i < driveHistory.length; i++) {
-            const d = driveHistory[i];
-            const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
-            const y = pad.top + plotH - Math.min(smoothed[i], 1.0) * plotH;
-            if (i === 0) cCtx.moveTo(x, y);
-            else cCtx.lineTo(x, y);
-        }
-        cCtx.stroke();
-        cCtx.setLineDash([]);
+    // Raw (faint)
+    cCtx.strokeStyle = "rgba(33, 150, 243, 0.18)";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    for (let i = 0; i < driveHistory.length; i++) {
+        const d = driveHistory[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - Math.min(combinedSatiety[i], 1.0) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
     }
+    cCtx.stroke();
+
+    // Smoothed satisfaction (primary)
+    cCtx.strokeStyle = "#0D47A1";
+    cCtx.lineWidth = 2.2;
+    cCtx.beginPath();
+    for (let i = 0; i < driveHistory.length; i++) {
+        const d = driveHistory[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - Math.min(smoothed[i], 1.0) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
 
     // Hover crosshair and tooltip
     if (satietyChartHoverX !== null) {
@@ -1039,8 +1330,12 @@ function renderSatietyChart() {
                 if (dist < minDist) { minDist = dist; closest = d; }
             }
 
-            const tooltipW = 110;
-            const tooltipH = 48;
+            const idx = driveHistory.indexOf(closest);
+            const currentSat = (closest.sat_hunger + closest.sat_thirst + closest.sat_temperature) / 3;
+            const smoothSat = idx >= 0 ? smoothed[idx] : currentSat;
+
+            const tooltipW = 150;
+            const tooltipH = 38;
             let tx = hx + 8;
             if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
             let ty = pad.top + 4;
@@ -1058,12 +1353,10 @@ function renderSatietyChart() {
             cCtx.textBaseline = "top";
             cCtx.fillStyle = "#333";
             cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
-            cCtx.fillStyle = "#4CAF50";
-            cCtx.fillText(`H: ${closest.sat_hunger.toFixed(2)}`, tx + 4, ty + 16);
-            cCtx.fillStyle = "#2196F3";
-            cCtx.fillText(`T: ${closest.sat_thirst.toFixed(2)}`, tx + 4, ty + 28);
-            cCtx.fillStyle = "#F44336";
-            cCtx.fillText(`Tp: ${closest.sat_temperature.toFixed(2)}`, tx + 4, ty + 38);
+            cCtx.fillStyle = "#1976D2";
+            cCtx.fillText(`Current: ${currentSat.toFixed(3)}`, tx + 4, ty + 16);
+            cCtx.fillStyle = "#0D47A1";
+            cCtx.fillText(`Smoothed: ${smoothSat.toFixed(3)}`, tx + 4, ty + 27);
         }
     }
 }
@@ -1365,6 +1658,231 @@ function renderCogMapReplay() {
     c.fillText(`${cellEntries.length} cells`, W - 4, H - 4);
 }
 
+function renderRewardComponentsChart() {
+    const chartCanvas = document.getElementById("reward-components-chart-canvas");
+    if (!chartCanvas) return;
+    const cCtx = chartCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = chartCanvas.getBoundingClientRect();
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    cCtx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
+
+    cCtx.fillStyle = "#fff";
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = { top: 8, right: 12, bottom: 22, left: 44 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Axis frame
+    cCtx.strokeStyle = "#ccc";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, pad.top);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.stroke();
+
+    // Axis labels
+    cCtx.save();
+    cCtx.fillStyle = "#888";
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.translate(8, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText("Per-tick reward terms", 0, 0);
+    cCtx.restore();
+
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
+
+    if (rewardComponentsHistory.length < 2) {
+        cCtx.fillStyle = "#9a9a9a";
+        cCtx.font = "11px sans-serif";
+        cCtx.textAlign = "center";
+        cCtx.textBaseline = "middle";
+        cCtx.fillText("DQN reward components unavailable", pad.left + plotW / 2, pad.top + plotH / 2);
+        return;
+    }
+
+    const minTick = rewardComponentsHistory[0].tick;
+    const maxTick = rewardComponentsHistory[rewardComponentsHistory.length - 1].tick;
+    const tickRange = maxTick - minTick || 1;
+
+    const allVals = [];
+    for (const d of rewardComponentsHistory) {
+        allVals.push(
+            d.drive_reduction,
+            d.shaping,
+            -d.urgency_penalty,
+            -d.off_target_penalty,
+            d.urgent_explore_bonus,
+            -d.urgent_explore_penalty,
+            d.total
+        );
+    }
+    const yMin = Math.min(-0.05, ...allVals);
+    const yMax = Math.max(0.05, ...allVals);
+    const yRange = yMax - yMin || 1;
+
+    // Y grid + labels
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+        const frac = i / ySteps;
+        const val = yMin + frac * yRange;
+        const y = pad.top + plotH - frac * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillText(val.toFixed(2), pad.left - 4, y);
+    }
+
+    // Zero line
+    const zeroY = pad.top + plotH - ((0 - yMin) / yRange) * plotH;
+    cCtx.strokeStyle = "rgba(0,0,0,0.18)";
+    cCtx.lineWidth = 1;
+    cCtx.setLineDash([4, 3]);
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, zeroY);
+    cCtx.lineTo(pad.left + plotW, zeroY);
+    cCtx.stroke();
+    cCtx.setLineDash([]);
+
+    // X ticks
+    cCtx.fillStyle = "#aaa";
+    cCtx.textBaseline = "top";
+    cCtx.textAlign = "center";
+    const tickStep = Math.max(1, Math.ceil(tickRange / 6));
+    for (let t = minTick; t <= maxTick; t += tickStep) {
+        const x = pad.left + ((t - minTick) / tickRange) * plotW;
+        cCtx.fillText(t, x, pad.top + plotH + 3);
+    }
+
+    const series = [
+        { key: "drive_reduction", color: "#2E7D32", dash: [], width: 2 },
+        { key: "shaping", color: "#1565C0", dash: [5, 3], width: 1.8 },
+        { key: "urgency_penalty", color: "#E65100", dash: [2, 2], width: 1.8, negate: true },
+        { key: "off_target_penalty", color: "#C62828", dash: [7, 2, 2, 2], width: 1.8, negate: true },
+        { key: "urgent_explore_bonus", color: "#00897B", dash: [4, 2], width: 1.8 },
+        { key: "urgent_explore_penalty", color: "#6A1B9A", dash: [1, 2], width: 1.8, negate: true },
+        { key: "total", color: "#7B1FA2", dash: [], width: 2.2 },
+    ];
+
+    for (const s of series) {
+        const values = rewardComponentsHistory.map((d) => (s.negate ? -d[s.key] : d[s.key]));
+        const smoothed = smoothArray(values, 0.2);
+        cCtx.strokeStyle = s.color;
+        cCtx.lineWidth = s.width;
+        cCtx.setLineDash(s.dash);
+        cCtx.beginPath();
+        for (let i = 0; i < rewardComponentsHistory.length; i++) {
+            const d = rewardComponentsHistory[i];
+            const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+            const y = pad.top + plotH - ((smoothed[i] - yMin) / yRange) * plotH;
+            if (i === 0) cCtx.moveTo(x, y);
+            else cCtx.lineTo(x, y);
+        }
+        cCtx.stroke();
+        cCtx.setLineDash([]);
+    }
+
+    // Compact legend
+    const legendItems = [
+        { label: "Drive reduction", color: "#2E7D32" },
+        { label: "Shaping", color: "#1565C0" },
+        { label: "-Urgency penalty", color: "#E65100" },
+        { label: "-Off-target penalty", color: "#C62828" },
+        { label: "+Urgent-search bonus", color: "#00897B" },
+        { label: "-Urgent-search penalty", color: "#6A1B9A" },
+        { label: "Total", color: "#7B1FA2" },
+    ];
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "left";
+    cCtx.textBaseline = "top";
+    let lx = pad.left + 4;
+    const ly = pad.top + 4;
+    for (const item of legendItems) {
+        cCtx.fillStyle = item.color;
+        cCtx.fillRect(lx, ly + 2, 8, 8);
+        cCtx.fillStyle = "#444";
+        cCtx.fillText(item.label, lx + 11, ly);
+        lx += cCtx.measureText(item.label).width + 28;
+    }
+
+    if (rewardComponentsHoverX !== null) {
+        const hx = rewardComponentsHoverX;
+        if (hx >= pad.left && hx <= pad.left + plotW) {
+            cCtx.strokeStyle = "rgba(0,0,0,0.3)";
+            cCtx.lineWidth = 1;
+            cCtx.setLineDash([2, 2]);
+            cCtx.beginPath();
+            cCtx.moveTo(hx, pad.top);
+            cCtx.lineTo(hx, pad.top + plotH);
+            cCtx.stroke();
+            cCtx.setLineDash([]);
+
+            const hoverTick = minTick + ((hx - pad.left) / plotW) * tickRange;
+            let closest = rewardComponentsHistory[0];
+            let minDist = Infinity;
+            for (const d of rewardComponentsHistory) {
+                const dist = Math.abs(d.tick - hoverTick);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = d;
+                }
+            }
+
+            const tooltipW = 170;
+            const tooltipH = 95;
+            let tx = hx + 8;
+            if (tx + tooltipW > pad.left + plotW) tx = hx - tooltipW - 8;
+            const ty = pad.top + 18;
+
+            cCtx.fillStyle = "rgba(255,255,255,0.94)";
+            cCtx.strokeStyle = "#ccc";
+            cCtx.lineWidth = 1;
+            cCtx.beginPath();
+            cCtx.roundRect(tx, ty, tooltipW, tooltipH, 3);
+            cCtx.fill();
+            cCtx.stroke();
+
+            cCtx.font = "9px monospace";
+            cCtx.textAlign = "left";
+            cCtx.textBaseline = "top";
+            cCtx.fillStyle = "#333";
+            cCtx.fillText(`Tick: ${closest.tick}`, tx + 4, ty + 4);
+            cCtx.fillStyle = "#2E7D32";
+            cCtx.fillText(`Drive:  ${closest.drive_reduction.toFixed(4)}`, tx + 4, ty + 16);
+            cCtx.fillStyle = "#1565C0";
+            cCtx.fillText(`Shaping:${closest.shaping.toFixed(4)}`, tx + 4, ty + 27);
+            cCtx.fillStyle = "#E65100";
+            cCtx.fillText(`Penalty:${closest.urgency_penalty.toFixed(4)}`, tx + 4, ty + 38);
+            cCtx.fillStyle = "#C62828";
+            cCtx.fillText(`OffTar: ${closest.off_target_penalty.toFixed(4)}`, tx + 4, ty + 49);
+            cCtx.fillStyle = "#00897B";
+            cCtx.fillText(`Search+:${closest.urgent_explore_bonus.toFixed(4)}`, tx + 4, ty + 60);
+            cCtx.fillStyle = "#6A1B9A";
+            cCtx.fillText(`Search-:${closest.urgent_explore_penalty.toFixed(4)}`, tx + 4, ty + 71);
+            cCtx.fillStyle = "#7B1FA2";
+            cCtx.fillText(`Total:  ${closest.total.toFixed(4)}`, tx + 4, ty + 82);
+        }
+    }
+}
+
 function renderRewardChart() {
     const chartCanvas = document.getElementById("reward-chart-canvas");
     if (!chartCanvas) return;
@@ -1411,7 +1929,14 @@ function renderRewardChart() {
     cCtx.font = "9px monospace";
     cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
 
-    if (rewardHistory.length < 2) return;
+    if (rewardHistory.length < 2) {
+        cCtx.fillStyle = "#9a9a9a";
+        cCtx.font = "11px sans-serif";
+        cCtx.textAlign = "center";
+        cCtx.textBaseline = "middle";
+        cCtx.fillText("DQN cumulative reward unavailable", pad.left + plotW / 2, pad.top + plotH / 2);
+        return;
+    }
 
     const minTick = rewardHistory[0].tick;
     const maxTick = rewardHistory[rewardHistory.length - 1].tick;
@@ -1580,7 +2105,14 @@ function renderLossChart() {
     cCtx.font = "9px monospace";
     cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
 
-    if (lossHistory.length < 2) return;
+    if (lossHistory.length < 2) {
+        cCtx.fillStyle = "#9a9a9a";
+        cCtx.font = "11px sans-serif";
+        cCtx.textAlign = "center";
+        cCtx.textBaseline = "middle";
+        cCtx.fillText("DQN training loss unavailable", pad.left + plotW / 2, pad.top + plotH / 2);
+        return;
+    }
 
     // Filter to only non-zero losses (before batch_size is reached, loss is 0)
     const nonZero = lossHistory.filter(d => d.loss > 0);
@@ -2283,19 +2815,33 @@ function updateVTESummary(agent) {
 
 // --- Controls ---
 document.getElementById("btn-play").onclick = () => {
+    if (!_isConnected) return;
     send({ action: "play" });
-    document.getElementById("place-section").classList.add("editing-disabled");
-    document.getElementById("edit-hint").textContent = "Pause to edit";
+    setCommandFeedback("Play requested…");
 };
 document.getElementById("btn-pause").onclick = () => {
+    if (!_isConnected) return;
     send({ action: "pause" });
-    document.getElementById("place-section").classList.remove("editing-disabled");
-    document.getElementById("edit-hint").textContent = "L-click place / R-click remove";
+    setCommandFeedback("Pause requested…");
 };
-document.getElementById("btn-step").onclick = () => send({ action: "step" });
+document.getElementById("btn-step").onclick = () => {
+    if (!_isConnected) return;
+    setRunState(false, true);
+    send({ action: "step" });
+};
 document.getElementById("btn-reset").onclick = () => {
+    if (!_isConnected) return;
     send({ action: "reset" });
     resetTuningSliders();
+    setCommandFeedback("Reset requested…");
+};
+document.getElementById("btn-save-model").onclick = () => {
+    if (!_isConnected) return;
+    const name = prompt("Checkpoint name (optional):");
+    const payload = { action: "save_model" };
+    if (name && name.trim()) payload.name = name.trim();
+    send(payload);
+    setCommandFeedback("Model checkpoint save requested…");
 };
 
 const speedSlider = document.getElementById("speed-slider");
@@ -2303,6 +2849,7 @@ const speedVal = document.getElementById("speed-val");
 speedSlider.oninput = () => {
     speedVal.textContent = speedSlider.value;
     send({ action: "speed", value: parseInt(speedSlider.value) });
+    setCommandFeedback(`Speed set to ${speedSlider.value} tps`);
 };
 
 // Preset selector
@@ -2310,15 +2857,18 @@ const presetSelect = document.getElementById("preset-select");
 presetSelect.onchange = () => {
     if (presetSelect.value) {
         send({ action: "load_preset", preset: presetSelect.value });
+        setCommandFeedback(`Loading preset: ${presetSelect.value}…`);
     }
 };
 
 // Grid resize
 document.getElementById("btn-regenerate").onclick = () => {
+    if (!_isConnected) return;
     const w = parseInt(document.getElementById("grid-width").value) || 20;
     const h = parseInt(document.getElementById("grid-height").value) || 20;
     presetSelect.value = "";
     send({ action: "resize", width: w, height: h });
+    setCommandFeedback(`Resizing map to ${w}x${h}…`);
 };
 
 // Reset preset dropdown on manual width/height changes
@@ -2327,9 +2877,11 @@ document.getElementById("grid-height").oninput = () => { presetSelect.value = ""
 
 // Save current environment as a preset
 document.getElementById("btn-save-preset").onclick = () => {
+    if (!_isConnected) return;
     const name = prompt("Preset name:");
     if (name && name.trim()) {
         send({ action: "save_preset", name: name.trim() });
+        setCommandFeedback(`Saving preset: ${name.trim()}…`);
     }
 };
 
@@ -2370,6 +2922,7 @@ function canvasToGrid(e) {
 }
 
 function placeStimulus(x, y) {
+    if (!canEditMap()) return;
     const key = `${x},${y}`;
     if (_lastPaintCell === key) return;  // skip duplicate
     _lastPaintCell = key;
@@ -2388,6 +2941,7 @@ function placeStimulus(x, y) {
 }
 
 canvas.addEventListener("mousedown", (e) => {
+    if (!canEditMap()) return;
     if (e.button === 0) {  // left button
         _painting = true;
         _lastPaintCell = null;
@@ -2398,7 +2952,7 @@ canvas.addEventListener("mousedown", (e) => {
 
 canvas.addEventListener("mousemove", (e) => {
     const [gx, gy] = canvasToGrid(e);
-    if (_painting) {
+    if (_painting && canEditMap()) {
         placeStimulus(gx, gy);
     }
     // Hover detection for stimulus tooltip
@@ -2432,6 +2986,7 @@ canvas.addEventListener("mouseleave", () => {
 // Right-click to remove stimulus
 canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
+    if (!canEditMap()) return;
     const [x, y] = canvasToGrid(e);
     send({ action: "remove_stimulus", position: [x, y] });
 });
@@ -2484,6 +3039,19 @@ memoryChartCanvas.addEventListener("mouseleave", () => {
     renderMemoryChart();
 });
 
+const rewardComponentsChartCanvas = document.getElementById("reward-components-chart-canvas");
+if (rewardComponentsChartCanvas) {
+    rewardComponentsChartCanvas.addEventListener("mousemove", (e) => {
+        const rect = rewardComponentsChartCanvas.getBoundingClientRect();
+        rewardComponentsHoverX = e.clientX - rect.left;
+        renderRewardComponentsChart();
+    });
+    rewardComponentsChartCanvas.addEventListener("mouseleave", () => {
+        rewardComponentsHoverX = null;
+        renderRewardComponentsChart();
+    });
+}
+
 const rewardChartCanvas = document.getElementById("reward-chart-canvas");
 if (rewardChartCanvas) {
     rewardChartCanvas.addEventListener("mousemove", (e) => {
@@ -2515,8 +3083,7 @@ document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
     if (e.code === "Space") {
         e.preventDefault();
-        const placeSection = document.getElementById("place-section");
-        if (placeSection.classList.contains("editing-disabled")) {
+        if (_isRunning) {
             document.getElementById("btn-pause").click();
         } else {
             document.getElementById("btn-play").click();
@@ -2556,6 +3123,10 @@ function resetTuningSliders() {
 }
 
 document.getElementById("btn-reset-tuning").onclick = resetTuningSliders;
+document.getElementById("fidelity-mode").onchange = (e) => {
+    _fidelityMode = e.target.value || "auto";
+    setCommandFeedback(`Chart fidelity: ${_fidelityMode}`);
+};
 
 // --- Accessibility: periodic live region update ---
 let _a11yTick = 0;
@@ -2576,4 +3147,6 @@ function updateA11yLiveRegion(state) {
 
 // Start
 syncTrajectoryHeight();
+setRunState(false, false);
+setConnectionState("connecting");
 connectWebSocket();

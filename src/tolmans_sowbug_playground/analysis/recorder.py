@@ -76,6 +76,14 @@ class Recorder:
                     "thirst",
                     "temperature",
                     "perception_count",
+                    "reward_total",
+                    "reward_drive_reduction",
+                    "reward_shaping",
+                    "reward_urgency_penalty",
+                    "reward_off_target_penalty",
+                    "reward_urgent_explore_bonus",
+                    "reward_urgent_explore_penalty",
+                    "reward_stasis_penalty",
                 ],
             )
             writer.writeheader()
@@ -97,5 +105,27 @@ class Recorder:
                             "perception_count": agent_state.get(
                                 "perception_count", 0
                             ),
+                            "reward_total": agent_state.get("reward_total"),
+                            "reward_drive_reduction": agent_state.get(
+                                "reward_components", {}
+                            ).get("drive_reduction"),
+                            "reward_shaping": agent_state.get(
+                                "reward_components", {}
+                            ).get("shaping"),
+                            "reward_urgency_penalty": agent_state.get(
+                                "reward_components", {}
+                            ).get("urgency_penalty"),
+                            "reward_off_target_penalty": agent_state.get(
+                                "reward_components", {}
+                            ).get("off_target_penalty"),
+                            "reward_urgent_explore_bonus": agent_state.get(
+                                "reward_components", {}
+                            ).get("urgent_explore_bonus"),
+                            "reward_urgent_explore_penalty": agent_state.get(
+                                "reward_components", {}
+                            ).get("urgent_explore_penalty"),
+                            "reward_stasis_penalty": agent_state.get(
+                                "reward_components", {}
+                            ).get("stasis_penalty"),
                         }
                     )

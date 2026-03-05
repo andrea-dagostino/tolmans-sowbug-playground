@@ -17,6 +17,7 @@ class Transition(NamedTuple):
     reward: float
     next_state: torch.Tensor
     done: bool
+    next_valid_mask: torch.Tensor | None = None
 
 
 class ReplayMemory:
@@ -32,8 +33,11 @@ class ReplayMemory:
         reward: float,
         next_state: torch.Tensor,
         done: bool,
+        next_valid_mask: torch.Tensor | None = None,
     ) -> None:
-        self.buffer.append(Transition(state, action, reward, next_state, done))
+        self.buffer.append(
+            Transition(state, action, reward, next_state, done, next_valid_mask)
+        )
 
     def sample(self, batch_size: int) -> list[Transition]:
         return random.sample(list(self.buffer), batch_size)
@@ -106,13 +110,22 @@ class DQNAgent:
             -self.steps_done / self.eps_decay
         )
 
-    def select_action(self, state: torch.Tensor) -> int:
+    def select_action(
+        self, state: torch.Tensor, valid_actions: list[int] | None = None
+    ) -> int:
         """Epsilon-greedy action selection."""
+        candidate_actions = (
+            valid_actions if valid_actions else list(range(self.n_actions))
+        )
         self.steps_done += 1
         if random.random() < self.epsilon:
-            return random.randrange(self.n_actions)
+            return random.choice(candidate_actions)
         with torch.no_grad():
             q_values = self.policy_net(state.unsqueeze(0))
+            if len(candidate_actions) != self.n_actions:
+                masked = torch.full_like(q_values, float("-inf"))
+                masked[:, candidate_actions] = q_values[:, candidate_actions]
+                q_values = masked
             return int(q_values.argmax(dim=1).item())
 
     def get_q_values(self, state: torch.Tensor) -> torch.Tensor:
@@ -139,13 +152,25 @@ class DQNAgent:
         done_batch = torch.tensor(
             [t.done for t in transitions], dtype=torch.bool
         )
+        next_valid_mask_batch = torch.stack(
+            [
+                (
+                    t.next_valid_mask.to(dtype=torch.bool)
+                    if t.next_valid_mask is not None
+                    else torch.ones(self.n_actions, dtype=torch.bool)
+                )
+                for t in transitions
+            ]
+        )
 
         # Q(s, a) for the actions actually taken
         q_values = self.policy_net(state_batch).gather(1, action_batch.unsqueeze(1))
 
         # V(s') = max_a Q_target(s', a)  — zero for terminal states
         with torch.no_grad():
-            next_q_values = self.target_net(next_state_batch).max(dim=1).values
+            next_q_values = self._compute_next_q_values(
+                next_state_batch, next_valid_mask_batch
+            )
             next_q_values[done_batch] = 0.0
 
         expected_q = reward_batch + self.gamma * next_q_values
@@ -159,6 +184,17 @@ class DQNAgent:
 
         self.last_loss = loss.item()
         return self.last_loss
+
+    def _compute_next_q_values(
+        self, next_state_batch: torch.Tensor, next_valid_mask_batch: torch.Tensor
+    ) -> torch.Tensor:
+        """Max target Q over valid next actions only."""
+        next_q_all = self.target_net(next_state_batch)
+        masked_next_q = next_q_all.masked_fill(~next_valid_mask_batch, float("-inf"))
+        next_q_values = masked_next_q.max(dim=1).values
+        all_invalid = ~next_valid_mask_batch.any(dim=1)
+        next_q_values[all_invalid] = 0.0
+        return next_q_values
 
     def soft_update_target(self) -> None:
         """Polyak averaging: target ← τ·policy + (1-τ)·target."""

@@ -1,5 +1,8 @@
 """DQN-based sowbug agent — learns Q(state, action) through experience replay."""
 
+from collections import deque
+from pathlib import Path
+
 import torch
 
 from tolmans_sowbug_playground.core.agent import Agent
@@ -36,6 +39,15 @@ STIMULUS_TYPES = [
 ]
 
 N_ACTIONS = len(ACTION_DIRECTIONS)
+CRITICAL_URGENCY_LEVEL = 0.85
+CRITICAL_OFF_TARGET_PENALTY = 0.12
+URGENT_EXPLORE_LEVEL = 0.7
+URGENT_EXPLORE_NOVELTY_BONUS = 0.02
+URGENT_EXPLORE_STAY_PENALTY = 0.02
+URGENT_EXPLORE_LOOP_PENALTY = 0.01
+HIGH_URGENCY_STASIS_LEVEL = 0.6
+HIGH_URGENCY_STAY_PENALTY = 0.01
+HIGH_URGENCY_LOOP_PENALTY = 0.005
 
 
 DRIVE_TYPES = [DriveType.HUNGER, DriveType.THIRST, DriveType.TEMPERATURE]
@@ -79,6 +91,13 @@ class DQNSowbug(Agent):
         dqn_replay_capacity: int = 50000,
         dqn_optimize_every: int = 1,
         dqn_perception_k: int = 3,
+        dqn_urgent_explore_level: float = URGENT_EXPLORE_LEVEL,
+        dqn_urgent_explore_novelty_bonus: float = URGENT_EXPLORE_NOVELTY_BONUS,
+        dqn_urgent_explore_stay_penalty: float = URGENT_EXPLORE_STAY_PENALTY,
+        dqn_urgent_explore_loop_penalty: float = URGENT_EXPLORE_LOOP_PENALTY,
+        dqn_high_urgency_stasis_level: float = HIGH_URGENCY_STASIS_LEVEL,
+        dqn_high_urgency_stay_penalty: float = HIGH_URGENCY_STAY_PENALTY,
+        dqn_high_urgency_loop_penalty: float = HIGH_URGENCY_LOOP_PENALTY,
     ) -> None:
         drive_system = DriveSystem(
             drives=[
@@ -114,6 +133,13 @@ class DQNSowbug(Agent):
         self._perception_k = dqn_perception_k
         self._optimize_every = dqn_optimize_every
         self._tick_count = 0
+        self._urgent_explore_level = dqn_urgent_explore_level
+        self._urgent_explore_novelty_bonus = dqn_urgent_explore_novelty_bonus
+        self._urgent_explore_stay_penalty = dqn_urgent_explore_stay_penalty
+        self._urgent_explore_loop_penalty = dqn_urgent_explore_loop_penalty
+        self._high_urgency_stasis_level = dqn_high_urgency_stasis_level
+        self._high_urgency_stay_penalty = dqn_high_urgency_stay_penalty
+        self._high_urgency_loop_penalty = dqn_high_urgency_loop_penalty
 
         state_dim = compute_state_dim(dqn_perception_k)
         self._dqn = DQNAgent(
@@ -135,11 +161,25 @@ class DQNSowbug(Agent):
         self._prev_action: int | None = None
         self._prev_position: tuple[int, int] = position
         self._prev_drive_levels: dict[DriveType, float] = {}
+        self._prev_urgent_drive: DriveType | None = None
+        self._prev_urgent_level: float = 0.0
+        self._prev_urgent_target_known: bool = False
+        self._recent_positions: deque[tuple[int, int]] = deque(maxlen=8)
 
         # Visualization state
         self._last_q_values: dict[str, float] = {}
         self._chosen_direction: str = ""
         self._resource_consumptions: int = 0
+        self._last_reward_total: float = 0.0
+        self._last_reward_components: dict[str, float] = {
+            "drive_reduction": 0.0,
+            "shaping": 0.0,
+            "urgency_penalty": 0.0,
+            "off_target_penalty": 0.0,
+            "urgent_explore_bonus": 0.0,
+            "urgent_explore_penalty": 0.0,
+            "stasis_penalty": 0.0,
+        }
 
         # Passable moves cache (filled in perceive)
         self._passable_moves: dict[Direction, tuple[int, int]] = {}
@@ -160,6 +200,35 @@ class DQNSowbug(Agent):
                 (nx, ny)
             ):
                 self._passable_moves[d] = (nx, ny)
+
+    def _shortest_path_distance(
+        self, start: tuple[int, int], goal: tuple[int, int], environment: Environment
+    ) -> int | None:
+        """Manhattan-step shortest path length over passable cells."""
+        if start == goal:
+            return 0
+        if (
+            not environment.is_within_bounds(start)
+            or not environment.is_within_bounds(goal)
+            or not environment.is_passable(goal)
+        ):
+            return None
+        queue: deque[tuple[tuple[int, int], int]] = deque([(start, 0)])
+        seen = {start}
+        while queue:
+            (x, y), dist = queue.popleft()
+            for dx, dy in [Direction.NORTH.value, Direction.SOUTH.value, Direction.EAST.value, Direction.WEST.value]:
+                nx, ny = x + dx, y + dy
+                nxt = (nx, ny)
+                if nxt in seen:
+                    continue
+                if not environment.is_within_bounds(nxt) or not environment.is_passable(nxt):
+                    continue
+                if nxt == goal:
+                    return dist + 1
+                seen.add(nxt)
+                queue.append((nxt, dist + 1))
+        return None
 
     def _encode_state(self) -> torch.Tensor:
         """Encode current perceptions + drives into a fixed-size tensor."""
@@ -224,8 +293,29 @@ class DQNSowbug(Agent):
         self._prev_state = state
         self._prev_position = self.position
         self._prev_drive_levels = dict(self.drive_system.get_levels())
+        urgent = self.drive_system.get_most_urgent()
+        if urgent is not None and urgent.level >= 0.1:
+            self._prev_urgent_drive = urgent.drive_type
+            self._prev_urgent_level = urgent.level
+            urgent_stimulus = DRIVE_STIMULUS_MAP[urgent.drive_type]
+            has_visible_target = any(
+                p.stimulus.stimulus_type == urgent_stimulus for p in self.current_perceptions
+            )
+            gw, gh = self._grid_size
+            has_memory_target = (
+                self.memory_system.get_best_location_for(urgent_stimulus, gw, gh)
+                is not None
+            )
+            self._prev_urgent_target_known = has_visible_target or has_memory_target
+        else:
+            self._prev_urgent_drive = None
+            self._prev_urgent_level = 0.0
+            self._prev_urgent_target_known = False
 
-        action_idx = self._dqn.select_action(state)
+        valid_action_indices = [
+            i for i, direction in enumerate(ACTION_DIRECTIONS) if direction in self._passable_moves
+        ]
+        action_idx = self._dqn.select_action(state, valid_actions=valid_action_indices)
         self._prev_action = action_idx
 
         direction = ACTION_DIRECTIONS[action_idx]
@@ -241,6 +331,9 @@ class DQNSowbug(Agent):
 
     def post_act(self, environment: Environment) -> None:
         """Update drives, consume resources, compute reward, train DQN."""
+        # Re-perceive after movement so transition next_state matches
+        # the post-action world snapshot.
+        self.perceive(environment)
         self._tick_count += 1
 
         # Update drives (same as symbolic sowbug)
@@ -254,26 +347,66 @@ class DQNSowbug(Agent):
             StimulusType.HEAT: DriveType.TEMPERATURE,
         }
 
+        # Evaluate prior expectations at current position BEFORE recording
+        # new experience, to model disappointment-driven extinction.
+        for entry in list(self.memory_system.cognitive_map.get(self.position, [])):
+            actual_stim = [
+                s for s in stimuli_here if s.stimulus_type == entry.stimulus_type
+            ]
+            if actual_stim:
+                drive_type = consumable.get(entry.stimulus_type)
+                actual_reward = 0.0
+                if (
+                    drive_type is not None
+                    and self.drive_system.get_level(drive_type) > 0.1
+                ):
+                    actual_reward = 1.0
+                self.memory_system.update_expectation(
+                    self.position,
+                    entry.stimulus_type,
+                    actual_stim[0].intensity,
+                    actual_reward,
+                )
+            else:
+                self.memory_system.update_expectation(
+                    self.position, entry.stimulus_type, 0.0, 0.0
+                )
+
         for stimulus in stimuli_here:
             drive_type = consumable.get(stimulus.stimulus_type)
             if drive_type is None:
+                self.memory_system.record_experience(
+                    self.position, stimulus.stimulus_type, stimulus.intensity, 0.0
+                )
                 continue
             drive_level = self.drive_system.get_level(drive_type)
             if drive_level <= 0.1:
+                self.memory_system.record_experience(
+                    self.position, stimulus.stimulus_type, stimulus.intensity, 0.0
+                )
                 continue
             wanted = self.bite_size * drive_level
             actual = stimulus.consume(wanted)
             self.drive_system.satisfy(drive_type, actual)
-            if actual > 0:
+            reward_value = 1.0 if actual > 0 else 0.0
+            if reward_value > 0:
                 self._resource_consumptions += 1
-                # Record in memory for UI cognitive map display
-                self.memory_system.record_experience(
-                    self.position, stimulus.stimulus_type, stimulus.intensity, 1.0
-                )
+            self.memory_system.record_experience(
+                self.position, stimulus.stimulus_type, stimulus.intensity, reward_value
+            )
 
         # Compute reward: drive reduction + approach shaping + urgency penalty
         current_levels = self.drive_system.get_levels()
-        reward = 0.0
+        reward_drive_reduction = 0.0
+        reward_shaping = 0.0
+        reward_off_target_penalty = 0.0
+        reward_urgent_explore_bonus = 0.0
+        reward_urgent_explore_penalty = 0.0
+        reward_stasis_penalty = 0.0
+        critical_focus = (
+            self._prev_urgent_drive is not None
+            and self._prev_urgent_level >= CRITICAL_URGENCY_LEVEL
+        )
 
         # Primary: reward for drive reduction, scaled by (1 - satiety).
         # Diminishing returns: first bite when starving is highly rewarding,
@@ -285,7 +418,15 @@ class DQNSowbug(Agent):
             reduction = prev - curr
             if reduction > 0:
                 satiety = satiety_levels.get(dt, 0.0)
-                reward += reduction * (1.0 - satiety)
+                scaled_reduction = reduction * (1.0 - satiety)
+                if critical_focus and dt != self._prev_urgent_drive:
+                    # During critical urgency, downweight off-target consumption.
+                    # This prevents camping at a convenient but irrelevant resource.
+                    scaled_reduction *= 0.0
+                    reward_off_target_penalty += (
+                        reduction * CRITICAL_OFF_TARGET_PENALTY
+                    )
+                reward_drive_reduction += scaled_reduction
 
         # Shaping: reward for moving closer to the MOST URGENT drive's stimulus.
         # Only the highest drive gets approach shaping — forces the agent to
@@ -293,26 +434,24 @@ class DQNSowbug(Agent):
         # chasing whichever resource is closest.
         radius = self.sensor_system.perception_radius
         prev_pos = getattr(self, "_prev_position", self.position)
-        urgent = self.drive_system.get_most_urgent()
-        if urgent is not None and urgent.level >= 0.1:
-            stim_type = DRIVE_STIMULUS_MAP[urgent.drive_type]
-            drive_level = urgent.level
+        if self._prev_urgent_drive is not None and self._prev_urgent_level >= 0.1:
+            stim_type = DRIVE_STIMULUS_MAP[self._prev_urgent_drive]
+            drive_level = self._prev_urgent_level
             relevant = [
                 p for p in self.current_perceptions
                 if p.stimulus.stimulus_type == stim_type
             ]
             if relevant:
                 target = max(relevant, key=lambda p: p.perceived_intensity)
-                prev_dist = (
-                    (prev_pos[0] - target.stimulus.position[0]) ** 2
-                    + (prev_pos[1] - target.stimulus.position[1]) ** 2
-                ) ** 0.5
-                curr_dist = (
-                    (self.position[0] - target.stimulus.position[0]) ** 2
-                    + (self.position[1] - target.stimulus.position[1]) ** 2
-                ) ** 0.5
-                approach = (prev_dist - curr_dist) / max(radius, 1.0)
-                reward += 0.1 * approach * drive_level
+                prev_dist = self._shortest_path_distance(
+                    prev_pos, target.stimulus.position, environment
+                )
+                curr_dist = self._shortest_path_distance(
+                    self.position, target.stimulus.position, environment
+                )
+                if prev_dist is not None and curr_dist is not None:
+                    approach = (prev_dist - curr_dist) / max(radius, 1.0)
+                    reward_shaping += 0.1 * approach * drive_level
             else:
                 # Fallback: follow memory when the target resource isn't visible.
                 # Creates a gradient toward remembered locations even outside
@@ -322,28 +461,76 @@ class DQNSowbug(Agent):
                     stim_type, gw, gh
                 )
                 if best_mem is not None and best_mem != self.position:
-                    prev_dist = (
-                        (prev_pos[0] - best_mem[0]) ** 2
-                        + (prev_pos[1] - best_mem[1]) ** 2
-                    ) ** 0.5
-                    curr_dist = (
-                        (self.position[0] - best_mem[0]) ** 2
-                        + (self.position[1] - best_mem[1]) ** 2
-                    ) ** 0.5
-                    approach = (prev_dist - curr_dist) / max(radius, 1.0)
-                    reward += 0.05 * approach * drive_level
+                    prev_dist = self._shortest_path_distance(prev_pos, best_mem, environment)
+                    curr_dist = self._shortest_path_distance(self.position, best_mem, environment)
+                    if prev_dist is not None and curr_dist is not None:
+                        approach = (prev_dist - curr_dist) / max(radius, 1.0)
+                        reward_shaping += 0.05 * approach * drive_level
+
+        # When urgent target is unknown (not perceived, no memory), incentivize
+        # directed exploration and discourage camping/short loops.
+        urgent_search = (
+            self._prev_urgent_drive is not None
+            and self._prev_urgent_level >= self._urgent_explore_level
+            and not self._prev_urgent_target_known
+        )
+        if urgent_search:
+            familiarity = self.memory_system.visited.get(self.position, 0.0)
+            novelty = max(0.0, 1.0 - min(1.0, familiarity))
+            reward_urgent_explore_bonus = self._urgent_explore_novelty_bonus * novelty
+            if self.position == prev_pos:
+                reward_urgent_explore_penalty += self._urgent_explore_stay_penalty
+            if self.position in self._recent_positions:
+                reward_urgent_explore_penalty += self._urgent_explore_loop_penalty
+
+        # Generic anti-stasis pressure under high urgency, regardless of whether
+        # the target is "known". This helps break STAY/short-loop attractors.
+        max_drive = max(current_levels.values()) if current_levels else 0.0
+        if max_drive >= self._high_urgency_stasis_level:
+            if self.position == prev_pos:
+                reward_stasis_penalty += self._high_urgency_stay_penalty * max_drive
+            if self.position in self._recent_positions:
+                reward_stasis_penalty += self._high_urgency_loop_penalty * max_drive
 
         # Urgency penalty — quadratic so extreme drives create strong pressure
         # to move while barely affecting behavior when drives are low.
         # At (1.0, 1.0, 0.1): ~0.01/tick.  At (0.3, 0.2, 0.1): ~0.0007/tick.
         total_urgency = sum(v * v for v in current_levels.values())
-        reward -= 0.005 * total_urgency
+        reward_urgency_penalty = 0.005 * total_urgency
+        reward = (
+            reward_drive_reduction
+            + reward_shaping
+            - reward_urgency_penalty
+            - reward_off_target_penalty
+            + reward_urgent_explore_bonus
+            - reward_urgent_explore_penalty
+            - reward_stasis_penalty
+        )
+        self._last_reward_total = reward
+        self._last_reward_components = {
+            "drive_reduction": reward_drive_reduction,
+            "shaping": reward_shaping,
+            "urgency_penalty": reward_urgency_penalty,
+            "off_target_penalty": reward_off_target_penalty,
+            "urgent_explore_bonus": reward_urgent_explore_bonus,
+            "urgent_explore_penalty": reward_urgent_explore_penalty,
+            "stasis_penalty": reward_stasis_penalty,
+        }
 
         # Encode next state and push transition
         next_state = self._encode_state()
+        next_valid_mask = torch.tensor(
+            [direction in self._passable_moves for direction in ACTION_DIRECTIONS],
+            dtype=torch.bool,
+        )
         if self._prev_state is not None and self._prev_action is not None:
             self._dqn.memory.push(
-                self._prev_state, self._prev_action, reward, next_state, False
+                self._prev_state,
+                self._prev_action,
+                reward,
+                next_state,
+                False,
+                next_valid_mask,
             )
 
         # Optimize and update target network
@@ -354,6 +541,7 @@ class DQNSowbug(Agent):
         # Maintain memory system for UI
         self.memory_system.decay()
         self.memory_system.record_visit(self.position)
+        self._recent_positions.append(self.position)
 
     def get_state(self) -> dict:
         state = super().get_state()
@@ -362,6 +550,10 @@ class DQNSowbug(Agent):
         state["replay_size"] = len(self._dqn.memory)
         state["training_loss"] = round(self._dqn.last_loss, 6)
         state["resource_consumptions"] = self._resource_consumptions
+        state["reward_total"] = round(self._last_reward_total, 6)
+        state["reward_components"] = {
+            k: round(v, 6) for k, v in self._last_reward_components.items()
+        }
         state["decision_reason"] = "dqn"
         # Map to existing VTE format for UI compatibility
         state["vte"] = {
@@ -374,3 +566,11 @@ class DQNSowbug(Agent):
             "hesitated": False,
         }
         return state
+
+    def save_model(self, path: str | Path) -> None:
+        """Persist DQN checkpoint for this sowbug."""
+        self._dqn.save(path)
+
+    def load_model(self, path: str | Path) -> None:
+        """Load DQN checkpoint for this sowbug."""
+        self._dqn.load(path)

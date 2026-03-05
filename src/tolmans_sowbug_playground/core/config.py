@@ -1,6 +1,8 @@
 import random as rng
 from dataclasses import dataclass, field
 
+import numpy as np
+import torch
 import yaml
 
 from tolmans_sowbug_playground.agents.dqn_sowbug import DQNSowbug
@@ -41,6 +43,7 @@ class SimulationConfig:
     grid_height: int
     max_ticks: int
     random_seed: int
+    deterministic: bool
     stimuli: list[StimulusConfig]
     agent: AgentConfig
 
@@ -75,6 +78,7 @@ def load_config(path: str) -> SimulationConfig:
         grid_height=grid["height"],
         max_ticks=sim.get("max_ticks", 1000),
         random_seed=sim.get("random_seed", 42),
+        deterministic=sim.get("deterministic", False),
         stimuli=stimuli,
         agent=AgentConfig(
             agent_type=agent_raw.get("type", "sowbug"),
@@ -86,6 +90,12 @@ def load_config(path: str) -> SimulationConfig:
 
 def build_simulation(config: SimulationConfig) -> Simulation:
     rng.seed(config.random_seed)
+    np.random.seed(config.random_seed)
+    torch.manual_seed(config.random_seed)
+    if config.deterministic:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    else:
+        torch.use_deterministic_algorithms(False)
 
     env = Environment(width=config.grid_width, height=config.grid_height)
     for sc in config.stimuli:

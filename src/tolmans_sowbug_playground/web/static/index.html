@@ -22,6 +22,7 @@
                     <h3 class="chart-label">Trajectory</h3>
                     <canvas id="trajectory-canvas" height="260" aria-label="Agent trajectory chart showing cumulative path with cardinal directions" role="img"></canvas>
                     <h3 class="chart-label">Cognitive Map Replay</h3>
+                    <p id="replay-hint">Hover the Drives chart to scrub replay history.</p>
                     <canvas id="cogmap-replay-canvas" height="260"
                             aria-label="Cognitive map replay showing spatial memory at hovered tick"
                             role="img"></canvas>
@@ -69,8 +70,8 @@
                     <canvas id="drive-chart-canvas" height="260" aria-label="Drive levels over time chart" role="img"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3 class="chart-label">Satiety Levels</h3>
-                    <canvas id="satiety-chart-canvas" height="260" aria-label="Satiety levels over time chart" role="img"></canvas>
+                    <h3 class="chart-label">Satisfaction Level</h3>
+                    <canvas id="satiety-chart-canvas" height="260" aria-label="Satisfaction level over time chart (rolling average of combined satiety)" role="img"></canvas>
                 </div>
                 <div class="chart-container">
                     <h3 class="chart-label">Resource Gathering</h3>
@@ -80,11 +81,15 @@
                     <h3 class="chart-label">Memory Decay</h3>
                     <canvas id="memory-chart-canvas" height="260" aria-label="Memory decay over time chart" role="img"></canvas>
                 </div>
-                <div class="chart-container" id="reward-chart-container" style="display:none">
+                <div class="chart-container chart-wide" id="reward-components-chart-container">
+                    <h3 class="chart-label">Reward Components (Per Tick)</h3>
+                    <canvas id="reward-components-chart-canvas" height="280" aria-label="Per-tick reward decomposition chart for drive reduction shaping and urgency penalty" role="img"></canvas>
+                </div>
+                <div class="chart-container" id="reward-chart-container">
                     <h3 class="chart-label">Cumulative Reward</h3>
                     <canvas id="reward-chart-canvas" height="260" aria-label="Cumulative reward over time chart" role="img"></canvas>
                 </div>
-                <div class="chart-container" id="loss-chart-container" style="display:none">
+                <div class="chart-container" id="loss-chart-container">
                     <h3 class="chart-label">Training Loss</h3>
                     <canvas id="loss-chart-canvas" height="260" aria-label="DQN training loss over time chart" role="img"></canvas>
                 </div>
@@ -93,14 +98,16 @@
                     <dl>
                         <dt>Drive Chart</dt>
                         <dd>Plots the drive level for hunger, thirst and temperature over simulation ticks. Drives rise at a fixed rate and drop when the agent reaches the matching stimulus.</dd>
-                        <dt>Satiety Levels</dt>
-                        <dd>Tracks satiety for each drive over time. Satiety rises when the agent consumes a resource and decays exponentially. High satiety suppresses drive growth, modelling a post-feeding refractory period.</dd>
+                        <dt>Satisfaction Level</dt>
+                        <dd>Plots a rolling average of combined satiety across hunger, thirst, and temperature. It is a compact proxy for recent drive fulfillment (higher means the agent has been satisfying needs more consistently).</dd>
                         <dt>Resource Gathering</dt>
                         <dd>Tracks how efficiently the agent gathers resources over time. The solid line shows cumulative resource consumptions (drive-reducing visits). The faded line shows a rolling rate (consumptions per 20 ticks). A steeper cumulative slope indicates faster resource gathering.</dd>
                         <dt>Memory Decay</dt>
                         <dd>Visualizes the Ebbinghaus forgetting curve per stimulus type. Each solid line shows mean memory strength for that stimulus (Food, Water, Light, Heat). Count (orange, dashed) shows total entries normalized to peak — drops indicate eviction events. Visited (gray, dotted) shows mean spatial familiarity across visited cells.</dd>
                         <dt>Cumulative Reward (DQN)</dt>
-                        <dd>Shows the running sum of per-tick rewards. Reward = drive reduction from consuming resources minus a small urgency penalty. A rising curve means the agent is learning to seek resources. Only visible when using the DQN agent.</dd>
+                        <dd>Shows the running sum of exact per-tick rewards emitted by the DQN agent. A rising curve means the policy is improving expected outcomes. Only visible when using the DQN agent.</dd>
+                        <dt>Reward Components (DQN)</dt>
+                        <dd>Decomposes each tick reward into drive reduction, shaping, urgency penalty, off-target penalty, and urgent-search terms (bonus for novelty plus penalties for staying/looping when an urgent target is still unknown).</dd>
                         <dt>Training Loss (DQN)</dt>
                         <dd>Plots the Huber loss from DQN optimization. Raw loss is shown faintly with a rolling average overlay. Should start noisy then decrease and stabilize as Q-values converge. Only visible when using the DQN agent.</dd>
                         <dt>Cognitive Map Replay</dt>
@@ -116,17 +123,39 @@
                     <div class="sidebar-group-label">Controls</div>
                     <div class="panel" id="controls">
                         <h2>Controls</h2>
+                        <div id="status-row">
+                            <span id="run-state-badge" class="state-badge state-paused">Paused</span>
+                            <span id="conn-state-badge" class="state-badge state-connecting">Connecting</span>
+                        </div>
                         <div id="btn-group">
                             <button id="btn-play" aria-label="Play simulation">Play</button>
                             <button id="btn-pause" aria-label="Pause simulation">Pause</button>
                             <button id="btn-step" aria-label="Step one tick">Step</button>
                             <button id="btn-reset" aria-label="Reset simulation">Reset</button>
                         </div>
+                        <div id="checkpoint-controls">
+                            <button id="btn-save-model" aria-label="Save trained model checkpoint">Save Model</button>
+                            <span id="model-save-status" class="hint">No checkpoint saved</span>
+                        </div>
                         <div id="speed-control">
                             <label>Speed: <span id="speed-val">5</span> tps
                                 <input type="range" id="speed-slider" min="1" max="30" value="5">
                             </label>
                         </div>
+                        <div id="fidelity-row">
+                            <label for="fidelity-mode">Chart fidelity</label>
+                            <select id="fidelity-mode" aria-label="Chart fidelity mode">
+                                <option value="auto" selected>Auto</option>
+                                <option value="high">High</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                        <div id="perf-telemetry">
+                            <span id="perf-ingest">Ingest: 0/s</span>
+                            <span id="perf-chart">Charts: 0/s</span>
+                            <span id="perf-skip">Skipped: 0</span>
+                        </div>
+                        <div id="command-feedback" class="hint">Ready.</div>
                     </div>
                     <div class="panel" id="overlays">
                         <h2>Overlays</h2>

@@ -132,7 +132,11 @@ def plot_path_efficiency(
 def plot_cumulative_reward(
     records: list[dict], agent_index: int = 0
 ) -> Figure:
-    """Plot cumulative reward over time, derived from drive reductions."""
+    """Plot cumulative reward over time.
+
+    Uses explicit `reward_total` if present (DQN telemetry), otherwise
+    falls back to drive-delta approximation for backward compatibility.
+    """
     ticks, _, drive_data = _extract_agent_data(records, agent_index)
 
     rewards = []
@@ -141,15 +145,20 @@ def plot_cumulative_reward(
         if i == 0:
             rewards.append(0.0)
             continue
-        reward = 0.0
-        for dt in drive_data:
-            prev = drive_data[dt][i - 1]
-            curr = drive_data[dt][i]
-            reduction = prev - curr
-            if reduction > 0:
-                reward += reduction
-        max_drive = max(drive_data[dt][i] for dt in drive_data)
-        reward -= 0.01 * max_drive
+        agents = records[i].get("agents", [])
+        reward = None
+        if agent_index < len(agents):
+            reward = agents[agent_index].get("reward_total")
+        if reward is None:
+            reward = 0.0
+            for dt in drive_data:
+                prev = drive_data[dt][i - 1]
+                curr = drive_data[dt][i]
+                reduction = prev - curr
+                if reduction > 0:
+                    reward += reduction
+            max_drive = max(drive_data[dt][i] for dt in drive_data)
+            reward -= 0.01 * max_drive
         cumulative += reward
         rewards.append(cumulative)
 

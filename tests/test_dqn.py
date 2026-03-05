@@ -60,6 +60,30 @@ class TestDQNAgent:
         action = agent.select_action(state)
         assert 0 <= action < 5
 
+    def test_select_action_respects_valid_action_mask_when_exploring(self):
+        agent = DQNAgent(
+            state_dim=10, n_actions=5, eps_start=1.0, eps_end=1.0, eps_decay=1.0
+        )
+        state = torch.randn(10)
+        valid_actions = [1, 3]
+        for _ in range(50):
+            action = agent.select_action(state, valid_actions=valid_actions)
+            assert action in valid_actions
+
+    def test_select_action_respects_valid_action_mask_when_exploiting(self):
+        agent = DQNAgent(
+            state_dim=10, n_actions=5, eps_start=0.0, eps_end=0.0, eps_decay=1.0
+        )
+        with torch.no_grad():
+            # Make action 4 globally best, action 1 second best.
+            for p in agent.policy_net.parameters():
+                p.zero_()
+            final_layer = agent.policy_net.net[-1]
+            final_layer.bias.copy_(torch.tensor([0.0, 2.0, 0.5, 1.0, 5.0]))
+        state = torch.randn(10)
+        action = agent.select_action(state, valid_actions=[0, 1, 3])
+        assert action == 1
+
     def test_epsilon_decays(self):
         agent = DQNAgent(state_dim=10, n_actions=5, eps_start=0.9, eps_end=0.05)
         eps_initial = agent.epsilon
@@ -95,6 +119,25 @@ class TestDQNAgent:
         loss = agent.optimize()
         assert loss > 0.0
         assert agent.last_loss == loss
+
+    def test_compute_next_q_values_masks_invalid_actions(self):
+        agent = DQNAgent(state_dim=4, n_actions=3, eps_start=0.0, eps_end=0.0)
+        with torch.no_grad():
+            for p in agent.target_net.parameters():
+                p.zero_()
+            final_layer = agent.target_net.net[-1]
+            # Global max is action 2, but we'll mask it out.
+            final_layer.bias.copy_(torch.tensor([1.0, 2.0, 10.0]))
+        next_states = torch.randn(2, 4)
+        next_valid_mask = torch.tensor(
+            [
+                [True, False, False],   # only action 0 valid -> value 1.0
+                [False, True, False],   # only action 1 valid -> value 2.0
+            ],
+            dtype=torch.bool,
+        )
+        vals = agent._compute_next_q_values(next_states, next_valid_mask)
+        assert torch.allclose(vals, torch.tensor([1.0, 2.0]))
 
     def test_soft_update_target(self):
         agent = DQNAgent(state_dim=10, n_actions=5, tau=0.5)
