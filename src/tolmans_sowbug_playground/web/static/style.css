@@ -218,26 +218,32 @@ main {
     margin-bottom: 0.2rem;
 }
 
-#drive-chart-canvas,
 #satiety-chart-canvas,
 #coverage-chart-canvas,
 #memory-chart-canvas,
 #reward-components-chart-canvas,
 #reward-chart-canvas,
-#loss-chart-canvas {
+#organ-sight-chart-canvas,
+#organ-smell-chart-canvas,
+#organ-touch-chart-canvas,
+#organ-proprio-chart-canvas,
+#organ-rhythm-chart-canvas {
     width: 100%;
     background: #fff;
     border: 1px solid #eee;
     border-radius: 3px;
     display: block;
 }
-#drive-chart-canvas { height: 260px; }
 #satiety-chart-canvas { height: 260px; }
 #coverage-chart-canvas { height: 260px; }
 #memory-chart-canvas { height: 260px; }
 #reward-components-chart-canvas { height: 280px; }
 #reward-chart-canvas { height: 260px; }
-#loss-chart-canvas { height: 260px; }
+#organ-sight-chart-canvas,
+#organ-smell-chart-canvas,
+#organ-touch-chart-canvas,
+#organ-proprio-chart-canvas,
+#organ-rhythm-chart-canvas { height: 200px; }
 
 #charts-area .panel-help {
     grid-column: 1 / -1;
@@ -328,6 +334,29 @@ main {
 .state-live { background: #E8F5E9; color: #2E7D32; }
 .state-reconnecting { background: #FFF3E0; color: #E65100; }
 .state-offline { background: #FFEBEE; color: #C62828; }
+.state-build { background: #E3F2FD; color: #1565C0; }
+.state-run { background: #E8F5E9; color: #2E7D32; }
+.state-inspect { background: #F3E5F5; color: #6A1B9A; }
+
+#mode-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.3rem;
+}
+#mode-row label {
+    font-size: 0.72rem;
+    color: #666;
+}
+#ui-mode-select {
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 0.12rem 0.2rem;
+    font-size: 0.72rem;
+}
+#sandbox-row {
+    margin-bottom: 0.35rem;
+}
 
 #checkpoint-controls {
     display: flex;
@@ -344,7 +373,34 @@ main {
     font-size: 0.72rem;
     white-space: nowrap;
 }
+#btn-load-model {
+    padding: 0.2rem 0.45rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+#btn-refresh-models {
+    padding: 0.2rem 0.45rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
 #btn-save-model:hover { background: #f0f0f0; }
+#btn-load-model:hover { background: #f0f0f0; }
+#btn-refresh-models:hover { background: #f0f0f0; }
+#model-select {
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 0.12rem 0.2rem;
+    font-size: 0.72rem;
+    max-width: 210px;
+}
 #model-save-status {
     display: inline-block;
     max-width: 220px;
@@ -461,6 +517,18 @@ main {
     pointer-events: none;
 }
 .drive-bar span:last-child { width: 30px; font-size: 0.7rem; font-family: monospace; text-align: right; color: #666; transition: color 0.3s; }
+
+/* ---- Organ diagnostics ---- */
+.organ-bar { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.25rem; }
+.organ-bar label { width: 42px; font-size: 0.7rem; color: #555; flex-shrink: 0; }
+.organ-bar .bar-bg { flex: 1; height: 8px; background: #eee; border-radius: 3px; overflow: hidden; position: relative; }
+.organ-bar .bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+.bar-fill.organ-sight { background: #7C4DFF; }
+.bar-fill.organ-smell { background: #009688; }
+.bar-fill.organ-touch { background: #795548; }
+.bar-fill.organ-proprio { background: #FF5722; }
+.bar-fill.organ-rhythm { background: #607D8B; }
+.organ-bar span:last-child { width: 30px; font-size: 0.7rem; font-family: monospace; text-align: right; color: #666; }
 
 /* ---- Perceptions ---- */
 .perception-header {

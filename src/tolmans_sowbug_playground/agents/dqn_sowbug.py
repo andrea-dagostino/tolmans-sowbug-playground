@@ -1,6 +1,7 @@
 """DQN-based sowbug agent — learns Q(state, action) through experience replay."""
 
 from collections import deque
+import math
 from pathlib import Path
 
 import torch
@@ -12,7 +13,13 @@ from tolmans_sowbug_playground.systems.dqn import DQNAgent
 from tolmans_sowbug_playground.systems.drives import Drive, DriveSystem, DriveType
 from tolmans_sowbug_playground.systems.memory import MemorySystem
 from tolmans_sowbug_playground.systems.motor import Direction, MotorSystem
-from tolmans_sowbug_playground.systems.sensors import SensorSystem
+from tolmans_sowbug_playground.systems.organs import (
+    OrganConfig,
+    OrgansObservation,
+    compute_organ_state_dim,
+    encode_organs,
+)
+from tolmans_sowbug_playground.systems.sensors import Perception, SensorSystem
 
 DRIVE_STIMULUS_MAP = {
     DriveType.HUNGER: StimulusType.FOOD,
@@ -29,15 +36,6 @@ ACTION_DIRECTIONS = [
     Direction.STAY,
 ]
 
-# Ordered list of stimulus types for perception encoding
-STIMULUS_TYPES = [
-    StimulusType.FOOD,
-    StimulusType.WATER,
-    StimulusType.LIGHT,
-    StimulusType.HEAT,
-    StimulusType.OBSTACLE,
-]
-
 N_ACTIONS = len(ACTION_DIRECTIONS)
 CRITICAL_URGENCY_LEVEL = 0.85
 CRITICAL_OFF_TARGET_PENALTY = 0.12
@@ -51,14 +49,6 @@ HIGH_URGENCY_LOOP_PENALTY = 0.005
 
 
 DRIVE_TYPES = [DriveType.HUNGER, DriveType.THIRST, DriveType.TEMPERATURE]
-
-
-def compute_state_dim(perception_k: int = 3) -> int:
-    """Total dimensionality of the state vector.
-
-    3 drives + 3 satiety + 5 passable + 6 memory direction + 5*k*3 perceptions
-    """
-    return 3 + 3 + 5 + len(DRIVE_TYPES) * 2 + len(STIMULUS_TYPES) * perception_k * 3
 
 
 class DQNSowbug(Agent):
@@ -90,7 +80,6 @@ class DQNSowbug(Agent):
         dqn_batch_size: int = 128,
         dqn_replay_capacity: int = 50000,
         dqn_optimize_every: int = 1,
-        dqn_perception_k: int = 3,
         dqn_urgent_explore_level: float = URGENT_EXPLORE_LEVEL,
         dqn_urgent_explore_novelty_bonus: float = URGENT_EXPLORE_NOVELTY_BONUS,
         dqn_urgent_explore_stay_penalty: float = URGENT_EXPLORE_STAY_PENALTY,
@@ -98,7 +87,27 @@ class DQNSowbug(Agent):
         dqn_high_urgency_stasis_level: float = HIGH_URGENCY_STASIS_LEVEL,
         dqn_high_urgency_stay_penalty: float = HIGH_URGENCY_STAY_PENALTY,
         dqn_high_urgency_loop_penalty: float = HIGH_URGENCY_LOOP_PENALTY,
+        dqn_use_memory_target_known: bool = False,
+        dqn_use_memory_shaping: bool = False,
+        # Organ params
+        organ_sight_k: int = 3,
+        organ_sight_radius: float | None = None,
+        organ_sight_fov_degrees: float = 180.0,
+        organ_smell_radius: float | None = None,
+        organ_touch_radius: int = 1,
+        organ_rhythm_period: float = 100.0,
     ) -> None:
+        sight_radius = (
+            float(perception_radius)
+            if organ_sight_radius is None
+            else float(organ_sight_radius)
+        )
+        smell_radius = (
+            float(perception_radius) * 1.5
+            if organ_smell_radius is None
+            else float(organ_smell_radius)
+        )
+
         drive_system = DriveSystem(
             drives=[
                 Drive(
@@ -122,7 +131,7 @@ class DQNSowbug(Agent):
             position=position,
             orientation=Direction.NORTH,
             drive_system=drive_system,
-            sensor_system=SensorSystem(perception_radius=perception_radius),
+            sensor_system=SensorSystem(perception_radius=sight_radius),
             memory_system=MemorySystem(
                 learning_rate=0.1, decay_rate=0.01, kernel_bandwidth=0.0
             ),
@@ -130,7 +139,6 @@ class DQNSowbug(Agent):
         )
         self._grid_size: tuple[int, int] = (20, 20)
         self.bite_size = bite_size
-        self._perception_k = dqn_perception_k
         self._optimize_every = dqn_optimize_every
         self._tick_count = 0
         self._urgent_explore_level = dqn_urgent_explore_level
@@ -140,8 +148,19 @@ class DQNSowbug(Agent):
         self._high_urgency_stasis_level = dqn_high_urgency_stasis_level
         self._high_urgency_stay_penalty = dqn_high_urgency_stay_penalty
         self._high_urgency_loop_penalty = dqn_high_urgency_loop_penalty
+        self._use_memory_target_known = dqn_use_memory_target_known
+        self._use_memory_shaping = dqn_use_memory_shaping
 
-        state_dim = compute_state_dim(dqn_perception_k)
+        # Organ encoder
+        self._organ_config = OrganConfig(
+            sight_k=organ_sight_k,
+            sight_radius=sight_radius,
+            sight_fov_degrees=organ_sight_fov_degrees,
+            smell_radius=smell_radius,
+            touch_radius=organ_touch_radius,
+            rhythm_period=organ_rhythm_period,
+        )
+        state_dim = compute_organ_state_dim(self._organ_config)
         self._dqn = DQNAgent(
             state_dim=state_dim,
             n_actions=N_ACTIONS,
@@ -165,8 +184,9 @@ class DQNSowbug(Agent):
         self._prev_urgent_level: float = 0.0
         self._prev_urgent_target_known: bool = False
         self._recent_positions: deque[tuple[int, int]] = deque(maxlen=8)
+        self._last_consumption_ticks: dict[DriveType, int] = {}
 
-        # Visualization state
+        # Visualization / diagnostic state
         self._last_q_values: dict[str, float] = {}
         self._chosen_direction: str = ""
         self._resource_consumptions: int = 0
@@ -180,12 +200,15 @@ class DQNSowbug(Agent):
             "urgent_explore_penalty": 0.0,
             "stasis_penalty": 0.0,
         }
+        self._last_organ_obs: OrgansObservation | None = None
 
         # Passable moves cache (filled in perceive)
         self._passable_moves: dict[Direction, tuple[int, int]] = {}
+        self._environment: Environment | None = None
 
     def perceive(self, environment: Environment) -> None:
         self._grid_size = (environment.width, environment.height)
+        self._environment = environment
         super().perceive(environment)
 
         # Cache passable moves for state encoding and action masking
@@ -231,59 +254,46 @@ class DQNSowbug(Agent):
         return None
 
     def _encode_state(self) -> torch.Tensor:
-        """Encode current perceptions + drives into a fixed-size tensor."""
-        features: list[float] = []
+        """Encode current perceptions + internal state via the organ encoder."""
+        assert self._environment is not None
+        obs = encode_organs(
+            perceptions=self.current_perceptions,
+            environment=self._environment,
+            position=self.position,
+            orientation=self.orientation,
+            drive_system=self.drive_system,
+            passable_moves=self._passable_moves,
+            prev_position=self._prev_position,
+            tick=self._tick_count,
+            last_consumption_ticks=self._last_consumption_ticks,
+            config=self._organ_config,
+        )
+        self._last_organ_obs = obs
+        return obs.to_tensor()
 
-        # Drive levels (3 dims)
-        levels = self.drive_system.get_levels()
-        for dt in [DriveType.HUNGER, DriveType.THIRST, DriveType.TEMPERATURE]:
-            features.append(levels.get(dt, 0.0))
+    def _is_in_sight_fov(self, direction: tuple[int, int]) -> bool:
+        """Return True when vector lies within current forward sight cone."""
+        fx, fy = self.orientation.value
+        # If stationary orientation is unknown, keep omnidirectional fallback.
+        if fx == 0 and fy == 0:
+            return True
+        dx, dy = float(direction[0]), float(direction[1])
+        dist = math.hypot(dx, dy)
+        if dist <= 1e-9:
+            return True
+        fov = max(1.0, min(360.0, float(self._organ_config.sight_fov_degrees)))
+        half_fov_rad = math.radians(fov / 2.0)
+        cos_threshold = math.cos(half_fov_rad)
+        cos_angle = (dx * float(fx) + dy * float(fy)) / dist
+        return cos_angle >= cos_threshold
 
-        # Satiety levels (3 dims)
-        satiety = self.drive_system.get_satiety_levels()
-        for dt in [DriveType.HUNGER, DriveType.THIRST, DriveType.TEMPERATURE]:
-            features.append(satiety.get(dt, 0.0))
-
-        # Passable directions (5 dims: N, S, E, W, STAY)
-        for d in ACTION_DIRECTIONS:
-            features.append(1.0 if d in self._passable_moves else 0.0)
-
-        # Best remembered direction per drive (6 dims: dx, dy per drive type)
-        # Normalized by grid diagonal so values are in roughly [-1, 1]
-        gw, gh = self._grid_size
-        diag = max((gw**2 + gh**2) ** 0.5, 1.0)
-        for dt in DRIVE_TYPES:
-            stim_type = DRIVE_STIMULUS_MAP[dt]
-            best_pos = self.memory_system.get_best_location_for(stim_type, gw, gh)
-            if best_pos is not None and best_pos != self.position:
-                features.append((best_pos[0] - self.position[0]) / diag)
-                features.append((best_pos[1] - self.position[1]) / diag)
-            else:
-                features.extend([0.0, 0.0])
-
-        # Top-k perceptions per stimulus type (5 types × k × 3 dims each)
-        radius = self.sensor_system.perception_radius
-        for stype in STIMULUS_TYPES:
-            typed_perceptions = [
-                p
-                for p in self.current_perceptions
-                if p.stimulus.stimulus_type == stype
-            ]
-            # Sort by intensity descending, take top-k
-            typed_perceptions.sort(
-                key=lambda p: p.perceived_intensity, reverse=True
-            )
-            for i in range(self._perception_k):
-                if i < len(typed_perceptions):
-                    p = typed_perceptions[i]
-                    features.append(p.perceived_intensity)
-                    # Normalize direction by perception radius
-                    features.append(p.direction[0] / max(radius, 1.0))
-                    features.append(p.direction[1] / max(radius, 1.0))
-                else:
-                    features.extend([0.0, 0.0, 0.0])
-
-        return torch.tensor(features, dtype=torch.float32)
+    def _current_sight_perceptions(
+        self, stimulus_type: StimulusType | None = None
+    ) -> list[Perception]:
+        filtered = [p for p in self.current_perceptions if self._is_in_sight_fov(p.direction)]
+        if stimulus_type is None:
+            return filtered
+        return [p for p in filtered if p.stimulus.stimulus_type == stimulus_type]
 
     def decide(self) -> Direction:
         """Epsilon-greedy action selection from DQN."""
@@ -298,14 +308,16 @@ class DQNSowbug(Agent):
             self._prev_urgent_drive = urgent.drive_type
             self._prev_urgent_level = urgent.level
             urgent_stimulus = DRIVE_STIMULUS_MAP[urgent.drive_type]
-            has_visible_target = any(
-                p.stimulus.stimulus_type == urgent_stimulus for p in self.current_perceptions
+            has_visible_target = bool(
+                self._current_sight_perceptions(stimulus_type=urgent_stimulus)
             )
-            gw, gh = self._grid_size
-            has_memory_target = (
-                self.memory_system.get_best_location_for(urgent_stimulus, gw, gh)
-                is not None
-            )
+            has_memory_target = False
+            if self._use_memory_target_known:
+                gw, gh = self._grid_size
+                has_memory_target = (
+                    self.memory_system.get_best_location_for(urgent_stimulus, gw, gh)
+                    is not None
+                )
             self._prev_urgent_target_known = has_visible_target or has_memory_target
         else:
             self._prev_urgent_drive = None
@@ -391,6 +403,7 @@ class DQNSowbug(Agent):
             reward_value = 1.0 if actual > 0 else 0.0
             if reward_value > 0:
                 self._resource_consumptions += 1
+                self._last_consumption_ticks[drive_type] = self._tick_count
             self.memory_system.record_experience(
                 self.position, stimulus.stimulus_type, stimulus.intensity, reward_value
             )
@@ -437,10 +450,7 @@ class DQNSowbug(Agent):
         if self._prev_urgent_drive is not None and self._prev_urgent_level >= 0.1:
             stim_type = DRIVE_STIMULUS_MAP[self._prev_urgent_drive]
             drive_level = self._prev_urgent_level
-            relevant = [
-                p for p in self.current_perceptions
-                if p.stimulus.stimulus_type == stim_type
-            ]
+            relevant = self._current_sight_perceptions(stimulus_type=stim_type)
             if relevant:
                 target = max(relevant, key=lambda p: p.perceived_intensity)
                 prev_dist = self._shortest_path_distance(
@@ -452,7 +462,7 @@ class DQNSowbug(Agent):
                 if prev_dist is not None and curr_dist is not None:
                     approach = (prev_dist - curr_dist) / max(radius, 1.0)
                     reward_shaping += 0.1 * approach * drive_level
-            else:
+            elif self._use_memory_shaping:
                 # Fallback: follow memory when the target resource isn't visible.
                 # Creates a gradient toward remembered locations even outside
                 # perception range — prevents getting stuck in perception deserts.
@@ -555,6 +565,24 @@ class DQNSowbug(Agent):
             k: round(v, 6) for k, v in self._last_reward_components.items()
         }
         state["decision_reason"] = "dqn"
+        state["sight_perceptions"] = [
+            {
+                "stimulus_type": p.stimulus.stimulus_type.value,
+                "stimulus_position": list(p.stimulus.position),
+                "perceived_intensity": round(p.perceived_intensity, 3),
+                "distance": round(p.distance, 3),
+                "direction": list(p.direction),
+            }
+            for p in self._current_sight_perceptions()
+        ]
+        state["organ_radii"] = {
+            "sight": round(float(self._organ_config.sight_radius), 3),
+            "smell": round(float(self._organ_config.smell_radius), 3),
+            "touch": int(self._organ_config.touch_radius),
+            "sight_fov_degrees": round(float(self._organ_config.sight_fov_degrees), 3),
+        }
+        if self._last_organ_obs is not None:
+            state["organ_metrics"] = self._last_organ_obs.to_dict()
         # Map to existing VTE format for UI compatibility
         state["vte"] = {
             "is_deliberating": False,

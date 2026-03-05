@@ -14,6 +14,7 @@ from tolmans_sowbug_playground.core.config import SimulationConfig, StimulusConf
 from tolmans_sowbug_playground.core.simulation import Simulation
 
 STATIC_DIR = Path(__file__).parent / "static"
+PRESET_STORE_PATH = Path("results") / "presets.json"
 
 # Divider wall: full-width horizontal wall at y=15
 _DIVIDER_WALL: list[tuple[int, int]] = [(x, 15) for x in range(20) if x not in (3, 4)]
@@ -38,7 +39,7 @@ _MAZE_WALLS: list[tuple[int, int]] = (
 )
 
 # Environment presets
-PRESETS: dict[str, dict] = {
+BUILTIN_PRESETS: dict[str, dict] = {
     "Empty": {
         "grid_width": 20,
         "grid_height": 20,
@@ -122,12 +123,113 @@ PRESETS: dict[str, dict] = {
         ],
     },
 }
+PRESETS: dict[str, dict] = copy.deepcopy(BUILTIN_PRESETS)
+_BUILTIN_PRESET_NAMES = set(BUILTIN_PRESETS.keys())
+
+
+def _normalize_preset_payload(payload: dict) -> dict | None:
+    try:
+        grid_width = int(payload["grid_width"])
+        grid_height = int(payload["grid_height"])
+        ax, ay = payload["agent_position"]
+        stimuli = payload.get("stimuli", [])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    norm_stimuli: list[dict] = []
+    for s in stimuli:
+        if not isinstance(s, dict):
+            return None
+        if "type" not in s or "position" not in s:
+            return None
+        pos = s["position"]
+        if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+            return None
+        entry = {
+            "type": str(s["type"]),
+            "position": (int(pos[0]), int(pos[1])),
+            "intensity": float(s.get("intensity", 1.0)),
+            "radius": float(s.get("radius", 5.0)),
+        }
+        if "quantity" in s and s["quantity"] is not None:
+            entry["quantity"] = float(s["quantity"])
+        norm_stimuli.append(entry)
+
+    return {
+        "grid_width": grid_width,
+        "grid_height": grid_height,
+        "agent_position": (int(ax), int(ay)),
+        "stimuli": norm_stimuli,
+    }
+
+
+def _load_persisted_presets() -> None:
+    if not PRESET_STORE_PATH.exists():
+        return
+    try:
+        raw = json.loads(PRESET_STORE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw, dict):
+        return
+    for name, payload in raw.items():
+        if not isinstance(name, str):
+            continue
+        norm = _normalize_preset_payload(payload)
+        if norm is not None:
+            PRESETS[name] = norm
+
+
+def _persist_custom_presets() -> None:
+    custom = {k: v for k, v in PRESETS.items() if k not in _BUILTIN_PRESET_NAMES}
+    PRESET_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PRESET_STORE_PATH.write_text(
+        json.dumps(_make_json_safe(custom), indent=2, sort_keys=True)
+    )
+
+
+def _ordered_preset_names() -> list[str]:
+    builtin = [k for k in BUILTIN_PRESETS.keys() if k in PRESETS]
+    custom = sorted([k for k in PRESETS.keys() if k not in _BUILTIN_PRESET_NAMES])
+    return builtin + custom
+
+
+_load_persisted_presets()
 
 app = FastAPI(title="Schematic Sowbug")
 
 # Base configuration used to seed each websocket session.
 _base_config: SimulationConfig | None = None
 MODEL_DIR = Path("results") / "models"
+
+
+def _safe_model_filename(name: str, default: str) -> str:
+    requested = str(name).strip()
+    safe = requested.replace("/", "_").replace("\\", "_")
+    if not safe:
+        return default
+    if not safe.endswith(".pt"):
+        safe = f"{safe}.pt"
+    return safe
+
+
+def _list_session_models(session_dir: Path) -> list[str]:
+    if not session_dir.exists():
+        return []
+    return sorted([p.name for p in session_dir.glob("*.pt")])
+
+
+def _list_available_models(model_root: Path) -> list[str]:
+    """List checkpoints across all sessions as '<session>/<file>.pt' refs."""
+    if not model_root.exists():
+        return []
+    models: list[str] = []
+    for session_dir in model_root.iterdir():
+        if not session_dir.is_dir():
+            continue
+        for model_path in session_dir.glob("*.pt"):
+            models.append(f"{session_dir.name}/{model_path.name}")
+    return sorted(models)
 
 
 def _clone_config(config: SimulationConfig | None) -> SimulationConfig | None:
@@ -209,6 +311,7 @@ async def index():
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     session_id = uuid.uuid4().hex[:8]
+    session_dir = MODEL_DIR / session_id
     running = False
     speed = 5
     config = _clone_config(_base_config)
@@ -219,7 +322,12 @@ async def websocket_endpoint(ws: WebSocket):
         "status",
         action="connect",
         message=f"Session {session_id} connected.",
-        payload={"session_id": session_id},
+        payload={
+            "session_id": session_id,
+            "session_models": _list_session_models(session_dir),
+            "available_models": _list_available_models(MODEL_DIR),
+            "presets": _ordered_preset_names(),
+        },
     )
     await _send_state(ws, simulation, running, speed, session_id)
 
@@ -432,6 +540,7 @@ async def websocket_endpoint(ws: WebSocket):
                             "agent_position": config.agent.position,
                             "stimuli": stimuli_list,
                         }
+                        _persist_custom_presets()
                         await _send_event(
                             ws,
                             "ack",
@@ -440,7 +549,7 @@ async def websocket_endpoint(ws: WebSocket):
                             message=f'Preset "{preset_name}" saved.',
                             payload={
                                 "preset_saved": preset_name,
-                                "presets": list(PRESETS.keys()),
+                                "presets": _ordered_preset_names(),
                             },
                         )
                     else:
@@ -451,6 +560,15 @@ async def websocket_endpoint(ws: WebSocket):
                             request_id=request_id,
                             message="Preset name is required.",
                         )
+                elif action == "list_presets":
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message=f"Found {len(PRESETS)} preset(s).",
+                        payload={"presets": _ordered_preset_names()},
+                    )
                 elif action == "save_model":
                     if simulation and simulation.agents:
                         agent = simulation.agents[0]
@@ -464,17 +582,15 @@ async def websocket_endpoint(ws: WebSocket):
                             )
                         else:
                             tick = simulation.tick_count
-                            requested_name = str(data.get("name", "")).strip()
-                            safe_name = requested_name.replace("/", "_").replace("\\", "_")
-                            filename = (
-                                f"{safe_name}.pt"
-                                if safe_name
-                                else f"sowbug_tick{tick}.pt"
+                            filename = _safe_model_filename(
+                                str(data.get("name", "")),
+                                default=f"sowbug_tick{tick}.pt",
                             )
                             session_dir = MODEL_DIR / session_id
                             session_dir.mkdir(parents=True, exist_ok=True)
                             model_path = session_dir / filename
                             agent.save_model(model_path)
+                            session_models = _list_session_models(session_dir)
                             await _send_event(
                                 ws,
                                 "ack",
@@ -485,8 +601,102 @@ async def websocket_endpoint(ws: WebSocket):
                                     "model_saved": str(model_path),
                                     "model_saved_tick": tick,
                                     "model_session": session_id,
+                                    "session_models": session_models,
+                                    "available_models": _list_available_models(
+                                        MODEL_DIR
+                                    ),
                                 },
                             )
+                elif action == "load_model":
+                    if simulation and simulation.agents:
+                        requested_name = str(data.get("name", "")).strip()
+                        available_models = _list_available_models(MODEL_DIR)
+                        session_models = _list_session_models(session_dir)
+                        if not requested_name:
+                            if session_models:
+                                model_path = session_dir / session_models[-1]
+                            elif available_models:
+                                session_name, filename = available_models[-1].split(
+                                    "/", 1
+                                )
+                                model_path = MODEL_DIR / session_name / filename
+                            else:
+                                model_path = None
+                        else:
+                            # Accept either "<session>/<filename>.pt" refs from the
+                            # dropdown or plain filenames for current session.
+                            if "/" in requested_name:
+                                session_name, filename = requested_name.split("/", 1)
+                                filename = _safe_model_filename(filename, default="")
+                                model_path = MODEL_DIR / session_name / filename
+                            else:
+                                filename = _safe_model_filename(requested_name, default="")
+                                model_path = session_dir / filename
+
+                        if model_path is None:
+                            await _send_event(
+                                ws,
+                                "error",
+                                action=action,
+                                request_id=request_id,
+                                message="No saved checkpoints found.",
+                                payload={"available_models": available_models},
+                            )
+                        elif not model_path.exists():
+                            await _send_event(
+                                ws,
+                                "error",
+                                action=action,
+                                request_id=request_id,
+                                message=f'Checkpoint "{requested_name}" not found.',
+                                payload={"available_models": available_models},
+                            )
+                        else:
+                            # Always load into a fresh sowbug instance by resetting
+                            # the session simulation first, then restoring weights.
+                            running = False
+                            simulation = _init_simulation(config)
+                            if simulation and simulation.agents:
+                                agent = simulation.agents[0]
+                                if not hasattr(agent, "load_model"):
+                                    await _send_event(
+                                        ws,
+                                        "error",
+                                        action=action,
+                                        request_id=request_id,
+                                        message="Current agent does not support model loading.",
+                                    )
+                                else:
+                                    agent.load_model(model_path)
+                                    await _send_event(
+                                        ws,
+                                        "ack",
+                                        action=action,
+                                        request_id=request_id,
+                                        message=f'Checkpoint "{model_path.name}" loaded into fresh sowbug.',
+                                        payload={
+                                            "model_loaded": str(model_path),
+                                            "model_session": session_id,
+                                            "session_models": _list_session_models(session_dir),
+                                            "available_models": _list_available_models(MODEL_DIR),
+                                        },
+                                    )
+                                    await _send_state(ws, simulation, running, speed, session_id)
+                elif action == "list_models":
+                    session_models = _list_session_models(session_dir)
+                    available_models = _list_available_models(MODEL_DIR)
+                    await _send_event(
+                        ws,
+                        "ack",
+                        action=action,
+                        request_id=request_id,
+                        message=f"Found {len(available_models)} checkpoint(s).",
+                        payload={
+                            "session_models": session_models,
+                            "available_models": available_models,
+                            "model_session": session_id,
+                        },
+                    )
                 else:
                     await _send_event(
                         ws,
@@ -497,7 +707,14 @@ async def websocket_endpoint(ws: WebSocket):
                     )
             except asyncio.TimeoutError:
                 pass
-            except Exception as exc:
+            except WebSocketDisconnect:
+                break
+            except RuntimeError as exc:
+                # Happens when the client disconnects between receive/send calls.
+                # In that case, stop the loop quietly instead of attempting to
+                # send another error envelope to a closed socket.
+                if "websocket.send" in str(exc) or "websocket.close" in str(exc):
+                    break
                 await _send_event(
                     ws,
                     "error",
@@ -505,15 +722,33 @@ async def websocket_endpoint(ws: WebSocket):
                     request_id=request_id if "request_id" in locals() else None,
                     message=str(exc),
                 )
+            except Exception as exc:
+                try:
+                    await _send_event(
+                        ws,
+                        "error",
+                        action=action if "action" in locals() else None,
+                        request_id=request_id if "request_id" in locals() else None,
+                        message=str(exc),
+                    )
+                except (RuntimeError, WebSocketDisconnect):
+                    break
 
             if running and simulation:
                 simulation.step()
-                await _send_state(ws, simulation, running, speed, session_id)
+                try:
+                    await _send_state(ws, simulation, running, speed, session_id)
+                except (RuntimeError, WebSocketDisconnect):
+                    break
                 await asyncio.sleep(1.0 / speed)
             else:
                 await asyncio.sleep(0.05)
 
     except WebSocketDisconnect:
+        pass
+    except RuntimeError:
+        # Ignore disconnect races that surface as runtime errors from the
+        # websocket transport layer.
         pass
 
 

@@ -32,6 +32,7 @@ let showPerception = true;
 let showDensityField = true;
 let showVTE = true;
 let showLegend = true;
+// Kept for backward compatibility with legacy chart functions.
 let driveChartHoverX = null;
 let satietyChartHoverX = null;
 let resourceChartHoverX = null;
@@ -42,9 +43,11 @@ let _peakMemoryCount = 0;
 let rewardHistory = [];
 let lossHistory = [];
 let rewardChartHoverX = null;
+// Kept for backward compatibility with legacy chart functions.
 let lossChartHoverX = null;
 let rewardComponentsHistory = [];
 let rewardComponentsHoverX = null;
+let organHistory = [];
 let _cumulativeReward = 0;
 let eventLog = [];
 let _lastDrives = { hunger: 0, thirst: 0, temperature: 0 };
@@ -59,6 +62,8 @@ let _isConnected = false;
 let _connectionState = "connecting";
 let _fidelityMode = "auto";
 let _requestCounter = 0;
+let _uiMode = "run";
+let _editWhilePaused = true;
 
 let _ingestFrames = 0;
 let _chartRenders = 0;
@@ -76,6 +81,7 @@ const HISTORY_LIMITS = {
     reward: 5000,
     rewardComponents: 5000,
     loss: 5000,
+    organ: 5000,
     events: 600,
 };
 
@@ -146,21 +152,66 @@ function setRunState(running, stepping = false) {
         runBadge.className = `state-badge ${stateClass}`;
         runBadge.textContent = stepping ? "Stepping" : (_isRunning ? "Running" : "Paused");
     }
-    const placeSection = document.getElementById("place-section");
-    const hint = document.getElementById("edit-hint");
-    if (placeSection) placeSection.classList.toggle("editing-disabled", _isRunning);
-    if (hint) hint.textContent = _isRunning ? "Pause to edit" : "L-click place / R-click remove";
-
     const btnPlay = document.getElementById("btn-play");
     const btnPause = document.getElementById("btn-pause");
     const btnStep = document.getElementById("btn-step");
     if (btnPlay) btnPlay.disabled = !_isConnected || _isRunning;
     if (btnPause) btnPause.disabled = !_isConnected || !_isRunning;
     if (btnStep) btnStep.disabled = !_isConnected || _isRunning;
+    refreshEditabilityUI();
 }
 
 function canEditMap() {
-    return _isConnected && !_isRunning;
+    if (!_isConnected) return false;
+    if (_uiMode === "inspect") return false;
+    if (_uiMode === "build") return true;
+    return !_isRunning && _editWhilePaused;
+}
+
+function refreshEditabilityUI() {
+    const placeSection = document.getElementById("place-section");
+    const hint = document.getElementById("edit-hint");
+    const editable = canEditMap();
+    if (placeSection) placeSection.classList.toggle("editing-disabled", !editable);
+    if (hint) {
+        if (editable) {
+            hint.textContent = "L-click place / R-click remove";
+        } else if (_uiMode === "inspect") {
+            hint.textContent = "Inspect mode (editing disabled)";
+        } else if (_isRunning) {
+            hint.textContent = "Pause to edit (or switch to Build)";
+        } else if (_uiMode === "run" && !_editWhilePaused) {
+            hint.textContent = "Enable 'Edit while paused' or switch to Build";
+        } else {
+            hint.textContent = "Editing disabled";
+        }
+    }
+}
+
+function setUIMode(nextMode, announce = true) {
+    const mode = ["build", "run", "inspect"].includes(nextMode) ? nextMode : "run";
+    _uiMode = mode;
+    const modeSelect = document.getElementById("ui-mode-select");
+    if (modeSelect && modeSelect.value !== mode) modeSelect.value = mode;
+    const modeBadge = document.getElementById("ui-mode-badge");
+    if (modeBadge) {
+        modeBadge.className = `state-badge state-${mode}`;
+        modeBadge.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+    }
+    refreshEditabilityUI();
+    if (announce) {
+        setCommandFeedback(`Mode: ${mode}`);
+    }
+}
+
+function setEditWhilePaused(enabled, announce = true) {
+    _editWhilePaused = !!enabled;
+    const toggle = document.getElementById("edit-while-paused");
+    if (toggle && toggle.checked !== _editWhilePaused) toggle.checked = _editWhilePaused;
+    refreshEditabilityUI();
+    if (announce) {
+        setCommandFeedback(_editWhilePaused ? "Edit while paused: on" : "Edit while paused: off");
+    }
 }
 
 function nextRequestId() {
@@ -200,13 +251,12 @@ function scheduleFrameRender() {
         }
         if (_pendingChartRender) {
             renderChart();
-            renderDriveChart();
             renderSatietyChart();
             renderMemoryChart();
             renderTrajectoryChart();
             renderRewardComponentsChart();
             renderRewardChart();
-            renderLossChart();
+            renderOrganCharts();
             renderCogMapReplay();
             _chartRenders += 1;
             _pendingChartRender = false;
@@ -259,6 +309,33 @@ function syncTrajectoryHeight() {
 }
 window.addEventListener("resize", syncTrajectoryHeight);
 
+function updateModelSelect(models) {
+    const sel = document.getElementById("model-select");
+    if (!sel) return;
+    const prev = sel.value || "";
+    const list = Array.isArray(models) ? models : [];
+    sel.innerHTML =
+        '<option value="">Latest checkpoint</option>' +
+        list.map((m) => `<option value="${m}">${m}</option>`).join("");
+    if (prev && list.includes(prev)) {
+        sel.value = prev;
+    } else {
+        sel.value = "";
+    }
+}
+
+function updatePresetSelect(presets, selected = "") {
+    const sel = document.getElementById("preset-select");
+    if (!sel) return;
+    const list = Array.isArray(presets) ? presets : [];
+    sel.innerHTML =
+        '<option value="">Custom</option>' +
+        list.map((p) => `<option value="${p}">${p}</option>`).join("");
+    if (selected && list.includes(selected)) {
+        sel.value = selected;
+    }
+}
+
 function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -271,13 +348,16 @@ function connectWebSocket() {
         if (msg.type === "ack") {
             const payload = msg.payload || {};
             const action = msg.action || "command";
+            if (payload.presets) {
+                updatePresetSelect(payload.presets, payload.preset_saved || "");
+            }
+            if (payload.available_models) {
+                updateModelSelect(payload.available_models);
+            } else if (payload.session_models) {
+                updateModelSelect(payload.session_models);
+            }
             if (action === "save_preset" && payload.preset_saved) {
-                const sel = document.getElementById("preset-select");
-                const presets = payload.presets || [];
-                sel.innerHTML =
-                    '<option value="">Custom</option>' +
-                    presets.map((p) => `<option value="${p}">${p}</option>`).join("");
-                sel.value = payload.preset_saved;
+                updatePresetSelect(payload.presets || [], payload.preset_saved);
             }
             if (action === "save_model" && payload.model_saved) {
                 const status = document.getElementById("model-save-status");
@@ -287,15 +367,23 @@ function connectWebSocket() {
                     status.title = payload.model_saved;
                 }
             }
+            if (action === "load_model" && payload.model_loaded) {
+                const status = document.getElementById("model-save-status");
+                if (status) {
+                    status.textContent = `Loaded: ${payload.model_loaded}`;
+                    status.title = payload.model_loaded;
+                }
+            }
             setCommandFeedback(msg.message || `${action} applied`);
             return;
         }
 
         if (msg.type === "error") {
-            if (msg.action === "save_model") {
+            if (msg.action === "save_model" || msg.action === "load_model") {
                 const status = document.getElementById("model-save-status");
                 if (status) {
-                    status.textContent = `Save failed: ${msg.message}`;
+                    const kind = msg.action === "save_model" ? "Save" : "Load";
+                    status.textContent = `${kind} failed: ${msg.message}`;
                     status.title = msg.message;
                 }
             }
@@ -304,6 +392,15 @@ function connectWebSocket() {
         }
 
         if (msg.type === "status") {
+            const payload = msg.payload || {};
+            if (payload.presets) {
+                updatePresetSelect(payload.presets);
+            }
+            if (payload.available_models) {
+                updateModelSelect(payload.available_models);
+            } else if (payload.session_models) {
+                updateModelSelect(payload.session_models);
+            }
             setCommandFeedback(msg.message || "Status update");
             return;
         }
@@ -342,6 +439,7 @@ function connectWebSocket() {
             rewardHistory = [];
             lossHistory = [];
             rewardComponentsHistory = [];
+            organHistory = [];
             _cumulativeReward = 0;
             _peakMemoryCount = 0;
             eventLog = [];
@@ -386,7 +484,12 @@ function connectWebSocket() {
             const [px, py] = agent.position;
             const maxDrive = Math.max(entry.hunger, entry.thirst, entry.temperature);
             const frustration = agent.frustration_level || 0;
-            if (tick % trajectorySampleStride === 0) {
+            const lastPos = positionHistory.length > 0 ? positionHistory[positionHistory.length - 1] : null;
+            const positionChanged =
+                !lastPos ||
+                lastPos.x !== px ||
+                lastPos.y !== py;
+            if (tick % trajectorySampleStride === 0 || positionChanged) {
                 pushBounded(
                     positionHistory,
                     { tick, x: px, y: py, drive: maxDrive, frustration },
@@ -509,16 +612,31 @@ function connectWebSocket() {
                     );
                 }
             }
+
+            // Organ metrics over time (for sensory diagnostics)
+            const om = agent.organ_metrics || null;
+            if (om && tick % coreSampleStride === 0) {
+                pushBounded(
+                    organHistory,
+                    {
+                        tick,
+                        sight: om.sight_mag || 0,
+                        smell: om.smell_mag || 0,
+                        touch: om.touch_mag || 0,
+                        proprio: om.proprio_mag || 0,
+                        rhythm: om.rhythm_mag || 0,
+                    },
+                    HISTORY_LIMITS.organ
+                );
+            }
         }
         const chartStride = getChartRenderStride(tick);
         const hovering =
-            driveChartHoverX !== null ||
             satietyChartHoverX !== null ||
             resourceChartHoverX !== null ||
             memoryChartHoverX !== null ||
             rewardChartHoverX !== null ||
-            rewardComponentsHoverX !== null ||
-            lossChartHoverX !== null;
+            rewardComponentsHoverX !== null;
         if (hovering || tick % chartStride === 0) {
             _pendingChartRender = true;
         } else {
@@ -532,6 +650,7 @@ function connectWebSocket() {
         setConnectionState("live");
         setCommandFeedback("Connected.");
         setRunState(_isRunning, false);
+        send({ action: "list_presets" });
     };
 
     ws.onclose = () => {
@@ -548,6 +667,107 @@ function connectWebSocket() {
         setRunState(false, false);
         setCommandFeedback("WebSocket error. Waiting to reconnect…");
     };
+}
+
+function renderOrganSeriesChart(canvasId, key, color, yLabel) {
+    const chartCanvas = document.getElementById(canvasId);
+    if (!chartCanvas) return;
+    const cCtx = chartCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = chartCanvas.getBoundingClientRect();
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    cCtx.scale(dpr, dpr);
+    const W = rect.width;
+    const H = rect.height;
+
+    cCtx.fillStyle = "#fff";
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = { top: 10, right: 12, bottom: 22, left: 32 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    cCtx.strokeStyle = "#eee";
+    cCtx.lineWidth = 1;
+    cCtx.fillStyle = "#aaa";
+    cCtx.font = "9px monospace";
+    cCtx.textAlign = "right";
+    cCtx.textBaseline = "middle";
+    for (let v = 0; v <= 1.0; v += 0.25) {
+        const y = pad.top + plotH - v * plotH;
+        cCtx.beginPath();
+        cCtx.moveTo(pad.left, y);
+        cCtx.lineTo(pad.left + plotW, y);
+        cCtx.stroke();
+        cCtx.fillText(v.toFixed(2), pad.left - 4, y);
+    }
+
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.fillStyle = "#aaa";
+    cCtx.fillText("tick", pad.left + plotW / 2, H - 10);
+
+    cCtx.strokeStyle = "#ccc";
+    cCtx.lineWidth = 1;
+    cCtx.beginPath();
+    cCtx.moveTo(pad.left, pad.top);
+    cCtx.lineTo(pad.left, pad.top + plotH);
+    cCtx.lineTo(pad.left + plotW, pad.top + plotH);
+    cCtx.stroke();
+
+    if (organHistory.length < 2) {
+        cCtx.fillStyle = "#bbb";
+        cCtx.font = "11px sans-serif";
+        cCtx.textAlign = "center";
+        cCtx.textBaseline = "middle";
+        cCtx.fillText("Organ data unavailable", pad.left + plotW / 2, pad.top + plotH / 2);
+        return;
+    }
+
+    const minTick = organHistory[0].tick;
+    const maxTick = organHistory[organHistory.length - 1].tick;
+    const tickRange = maxTick - minTick || 1;
+
+    cCtx.fillStyle = "#aaa";
+    cCtx.textBaseline = "top";
+    cCtx.textAlign = "center";
+    const tickStep = Math.max(1, Math.ceil(tickRange / 5));
+    for (let t = minTick; t <= maxTick; t += tickStep) {
+        const x = pad.left + ((t - minTick) / tickRange) * plotW;
+        cCtx.fillText(t, x, pad.top + plotH + 3);
+    }
+
+    const smoothed = smoothArray(organHistory.map((d) => d[key]));
+    cCtx.strokeStyle = color;
+    cCtx.lineWidth = 2;
+    cCtx.beginPath();
+    for (let i = 0; i < organHistory.length; i++) {
+        const d = organHistory[i];
+        const x = pad.left + ((d.tick - minTick) / tickRange) * plotW;
+        const y = pad.top + plotH - Math.min(1.0, Math.max(0.0, smoothed[i])) * plotH;
+        if (i === 0) cCtx.moveTo(x, y);
+        else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    cCtx.save();
+    cCtx.fillStyle = color;
+    cCtx.font = "9px sans-serif";
+    cCtx.textAlign = "center";
+    cCtx.textBaseline = "top";
+    cCtx.translate(8, pad.top + plotH / 2);
+    cCtx.rotate(-Math.PI / 2);
+    cCtx.fillText(yLabel, 0, 0);
+    cCtx.restore();
+}
+
+function renderOrganCharts() {
+    renderOrganSeriesChart("organ-sight-chart-canvas", "sight", "#7C4DFF", "Sight mag");
+    renderOrganSeriesChart("organ-smell-chart-canvas", "smell", "#009688", "Smell mag");
+    renderOrganSeriesChart("organ-touch-chart-canvas", "touch", "#795548", "Touch mag");
+    renderOrganSeriesChart("organ-proprio-chart-canvas", "proprio", "#FF5722", "Proprio mag");
+    renderOrganSeriesChart("organ-rhythm-chart-canvas", "rhythm", "#607D8B", "Rhythm mag");
 }
 
 function send(data) {
@@ -669,41 +889,89 @@ function renderCognitiveMap(state) {
 function renderPerceptionRadius(state) {
     if (!state.agents || state.agents.length === 0) return;
     const agent = state.agents[0];
-    const radius = agent.perception_radius;
-    if (!radius) return;
+    const radii = agent.organ_radii || null;
+    const fallbackRadius = agent.perception_radius;
+    if (!radii && !fallbackRadius) return;
 
     const [ax, ay] = agent.position;
     const cx = ax * cellSize + cellSize / 2;
     const cy = ay * cellSize + cellSize / 2;
-    const pixelRadius = radius * cellSize;
+    const orientationAngles = {
+        NORTH: -Math.PI / 2,
+        SOUTH: Math.PI / 2,
+        EAST: 0,
+        WEST: Math.PI,
+    };
+    const drawRing = (radius, color, dash) => {
+        if (!radius || radius <= 0) return;
+        const pixelRadius = radius * cellSize;
+        ctx.globalAlpha = 0.04;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx, cy, pixelRadius, 0, Math.PI * 2);
+        ctx.fill();
 
-    ctx.globalAlpha = 0.05;
-    ctx.fillStyle = COLORS.perceptionRadius;
-    ctx.beginPath();
-    ctx.arc(cx, cy, pixelRadius, 0, Math.PI * 2);
-    ctx.fill();
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash(dash);
+        ctx.beginPath();
+        ctx.arc(cx, cy, pixelRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    };
+    const drawSightCone = (radius, fovDegrees) => {
+        if (!radius || radius <= 0) return;
+        const facing = orientationAngles[agent.orientation];
+        if (facing === undefined) return;
+        const fov = Math.max(1, Math.min(360, fovDegrees || 180));
+        if (fov >= 359.9) return;
+        const pixelRadius = radius * cellSize;
+        const half = (fov * Math.PI / 180) / 2;
+        const a0 = facing - half;
+        const a1 = facing + half;
 
-    ctx.globalAlpha = 0.3;
-    ctx.strokeStyle = COLORS.perceptionRadius;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.arc(cx, cy, pixelRadius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = COLORS.perceptionRadius;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, pixelRadius, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha = 0.42;
+        ctx.strokeStyle = COLORS.perceptionRadius;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a0) * pixelRadius, cy + Math.sin(a0) * pixelRadius);
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a1) * pixelRadius, cy + Math.sin(a1) * pixelRadius);
+        ctx.stroke();
+    };
+
+    if (radii) {
+        drawRing(radii.smell, COLORS.food, [3, 5]);
+        drawRing(radii.sight, COLORS.perceptionRadius, [6, 4]);
+        drawSightCone(radii.sight, radii.sight_fov_degrees);
+        drawRing(radii.touch, COLORS.heat, [1, 3]);
+    } else {
+        drawRing(fallbackRadius, COLORS.perceptionRadius, [5, 5]);
+    }
     ctx.globalAlpha = 1.0;
 }
 
 function renderPerceptionLines(state) {
     if (!state.agents || state.agents.length === 0) return;
     const agent = state.agents[0];
-    if (!agent.perceptions) return;
+    const perceptions = agent.sight_perceptions || agent.perceptions || [];
+    if (!perceptions.length) return;
 
     const [ax, ay] = agent.position;
     const agentCx = ax * cellSize + cellSize / 2;
     const agentCy = ay * cellSize + cellSize / 2;
 
-    for (const p of agent.perceptions) {
+    for (const p of perceptions) {
         const [sx, sy] = p.stimulus_position;
         const stimCx = sx * cellSize + cellSize / 2;
         const stimCy = sy * cellSize + cellSize / 2;
@@ -1550,12 +1818,12 @@ function renderCogMapReplay() {
     let snapshotIdx = cogMapHistory.length - 1;
     let isHover = false;
 
-    if (driveChartHoverX !== null && driveHistory.length >= 2) {
+    if (satietyChartHoverX !== null && driveHistory.length >= 2) {
         const plotW = W - pad.left - pad.right;
         const minTick = driveHistory[0].tick;
         const maxTick = driveHistory[driveHistory.length - 1].tick;
         const tickRange = maxTick - minTick || 1;
-        const hx = driveChartHoverX;
+        const hx = satietyChartHoverX;
         if (hx >= pad.left && hx <= pad.left + plotW) {
             const hoveredTick = minTick + ((hx - pad.left) / plotW) * tickRange;
             // Find closest cogMapHistory entry
@@ -2388,7 +2656,7 @@ function renderTrajectoryChart() {
     c.lineWidth = 0.5;
     c.strokeRect(ox, oy, drawW, drawH);
 
-    // Drive-colored trail dots — recent positions with drive intensity as color
+    // Trail dots — recent positions with age fade
     // Show last N dots so the trail is readable, not cluttered
     const trailLen = Math.min(positionHistory.length, 80);
     const trailStart = positionHistory.length - trailLen;
@@ -2396,14 +2664,10 @@ function renderTrajectoryChart() {
         const p = positionHistory[i];
         const sx = ox + (p.x - extMinX) / extW * drawW;
         const sy = oy + (p.y - extMinY) / extH * drawH;
-        const drive = p.drive != null ? p.drive : 0;
         const frust = p.frustration || 0;
         const age = (i - trailStart) / trailLen; // 0=oldest, 1=newest
 
-        // Drive color: green (low) -> yellow (mid) -> red (high)
-        const dr = Math.min(255, Math.round(drive * 2 * 255));
-        const dg = Math.min(255, Math.round((1 - drive) * 2 * 200));
-        c.fillStyle = `rgba(${dr},${dg},40,${0.25 + 0.65 * age})`;
+        c.fillStyle = `rgba(255,152,0,${0.25 + 0.65 * age})`;
         c.beginPath();
         c.arc(sx, sy, 2 + age * 1.5, 0, Math.PI * 2);
         c.fill();
@@ -2445,24 +2709,14 @@ function renderTrajectoryChart() {
     c.textBaseline = "bottom";
     const ly = oy + drawH - 4;
     const lx = ox + 4;
-    // Low drive dot
-    c.fillStyle = "rgba(0,200,40,0.8)";
-    c.beginPath(); c.arc(lx + 3, ly - 16, 3, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#777";
-    c.fillText("Low drive", lx + 9, ly - 12);
-    // High drive dot
-    c.fillStyle = "rgba(255,0,40,0.8)";
-    c.beginPath(); c.arc(lx + 3, ly - 6, 3, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#777";
-    c.fillText("High drive", lx + 9, ly - 2);
     // Frustration ring
     c.strokeStyle = "rgba(233,30,99,0.7)";
     c.lineWidth = 1;
     c.setLineDash([2, 2]);
-    c.beginPath(); c.arc(lx + 60 + 3, ly - 6, 4, 0, Math.PI * 2); c.stroke();
+    c.beginPath(); c.arc(lx + 3, ly - 6, 4, 0, Math.PI * 2); c.stroke();
     c.setLineDash([]);
     c.fillStyle = "#777";
-    c.fillText("Frustrated", lx + 60 + 10, ly - 2);
+    c.fillText("Frustrated", lx + 10, ly - 2);
 }
 
 function renderLegend() {
@@ -2769,7 +3023,21 @@ function updateDashboard(state) {
     updateMemorySummary(agent);
     updateVTESummary(agent);
     updateBehaviorBadge(agent);
+    updateOrganDiagnostics(agent);
     updateA11yLiveRegion(state);
+}
+
+function updateOrganDiagnostics(agent) {
+    const metrics = agent.organ_metrics;
+    if (!metrics) return;
+    const organs = ["sight", "smell", "touch", "proprio", "rhythm"];
+    for (const name of organs) {
+        const val = metrics[name + "_mag"] || 0;
+        const bar = document.getElementById(`organ-${name}-bar`);
+        const valEl = document.getElementById(`organ-${name}-val`);
+        if (bar) bar.style.width = `${Math.min(val, 1.0) * 100}%`;
+        if (valEl) valEl.textContent = val.toFixed(2);
+    }
 }
 
 function updateBehaviorBadge(agent) {
@@ -2816,6 +3084,7 @@ function updateVTESummary(agent) {
 // --- Controls ---
 document.getElementById("btn-play").onclick = () => {
     if (!_isConnected) return;
+    setUIMode("run", false);
     send({ action: "play" });
     setCommandFeedback("Play requested…");
 };
@@ -2843,9 +3112,39 @@ document.getElementById("btn-save-model").onclick = () => {
     send(payload);
     setCommandFeedback("Model checkpoint save requested…");
 };
+document.getElementById("btn-load-model").onclick = () => {
+    if (!_isConnected) return;
+    const sel = document.getElementById("model-select");
+    const name = sel ? sel.value : "";
+    const payload = { action: "load_model" };
+    if (name && name.trim()) payload.name = name.trim();
+    send(payload);
+    setCommandFeedback(
+        name && name.trim()
+            ? `Loading checkpoint: ${name.trim()}…`
+            : "Loading latest checkpoint…"
+    );
+};
+document.getElementById("btn-refresh-models").onclick = () => {
+    if (!_isConnected) return;
+    send({ action: "list_models" });
+    setCommandFeedback("Refreshing checkpoint list…");
+};
 
 const speedSlider = document.getElementById("speed-slider");
 const speedVal = document.getElementById("speed-val");
+const modeSelect = document.getElementById("ui-mode-select");
+if (modeSelect) {
+    modeSelect.onchange = (e) => {
+        setUIMode(e.target.value || "run");
+    };
+}
+const editWhilePausedToggle = document.getElementById("edit-while-paused");
+if (editWhilePausedToggle) {
+    editWhilePausedToggle.onchange = (e) => {
+        setEditWhilePaused(!!e.target.checked);
+    };
+}
 speedSlider.oninput = () => {
     speedVal.textContent = speedSlider.value;
     send({ action: "speed", value: parseInt(speedSlider.value) });
@@ -2992,21 +3291,8 @@ canvas.addEventListener("contextmenu", (e) => {
 });
 
 // --- Chart hover events ---
-const driveChartCanvas = document.getElementById("drive-chart-canvas");
 const satietyChartCanvas = document.getElementById("satiety-chart-canvas");
 const coverageChartCanvas = document.getElementById("coverage-chart-canvas");
-
-driveChartCanvas.addEventListener("mousemove", (e) => {
-    const rect = driveChartCanvas.getBoundingClientRect();
-    driveChartHoverX = e.clientX - rect.left;
-    renderDriveChart();
-    renderCogMapReplay();
-});
-driveChartCanvas.addEventListener("mouseleave", () => {
-    driveChartHoverX = null;
-    renderDriveChart();
-    renderCogMapReplay();
-});
 
 satietyChartCanvas.addEventListener("mousemove", (e) => {
     const rect = satietyChartCanvas.getBoundingClientRect();
@@ -3065,22 +3351,24 @@ if (rewardChartCanvas) {
     });
 }
 
-const lossChartCanvas = document.getElementById("loss-chart-canvas");
-if (lossChartCanvas) {
-    lossChartCanvas.addEventListener("mousemove", (e) => {
-        const rect = lossChartCanvas.getBoundingClientRect();
-        lossChartHoverX = e.clientX - rect.left;
-        renderLossChart();
-    });
-    lossChartCanvas.addEventListener("mouseleave", () => {
-        lossChartHoverX = null;
-        renderLossChart();
-    });
-}
-
 // --- Keyboard shortcuts ---
 document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+    if (e.code === "KeyB") {
+        e.preventDefault();
+        setUIMode("build");
+        return;
+    }
+    if (e.code === "KeyR") {
+        e.preventDefault();
+        setUIMode("run");
+        return;
+    }
+    if (e.code === "KeyI") {
+        e.preventDefault();
+        setUIMode("inspect");
+        return;
+    }
     if (e.code === "Space") {
         e.preventDefault();
         if (_isRunning) {
@@ -3147,6 +3435,8 @@ function updateA11yLiveRegion(state) {
 
 // Start
 syncTrajectoryHeight();
+setUIMode(_uiMode, false);
+setEditWhilePaused(_editWhilePaused, false);
 setRunState(false, false);
 setConnectionState("connecting");
 connectWebSocket();

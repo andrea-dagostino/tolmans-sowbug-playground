@@ -84,6 +84,11 @@ class Recorder:
                     "reward_urgent_explore_bonus",
                     "reward_urgent_explore_penalty",
                     "reward_stasis_penalty",
+                    "organ_sight_mag",
+                    "organ_smell_mag",
+                    "organ_touch_mag",
+                    "organ_proprio_mag",
+                    "organ_rhythm_mag",
                 ],
             )
             writer.writeheader()
@@ -127,5 +132,20 @@ class Recorder:
                             "reward_stasis_penalty": agent_state.get(
                                 "reward_components", {}
                             ).get("stasis_penalty"),
+                            "organ_sight_mag": agent_state.get(
+                                "organ_metrics", {}
+                            ).get("sight_mag"),
+                            "organ_smell_mag": agent_state.get(
+                                "organ_metrics", {}
+                            ).get("smell_mag"),
+                            "organ_touch_mag": agent_state.get(
+                                "organ_metrics", {}
+                            ).get("touch_mag"),
+                            "organ_proprio_mag": agent_state.get(
+                                "organ_metrics", {}
+                            ).get("proprio_mag"),
+                            "organ_rhythm_mag": agent_state.get(
+                                "organ_metrics", {}
+                            ).get("rhythm_mag"),
                         }
                     )

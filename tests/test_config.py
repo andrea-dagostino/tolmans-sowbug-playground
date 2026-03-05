@@ -58,6 +58,19 @@ class TestLoadConfig:
             pass
 
 
+class TestOrganConfigLoading:
+    def test_organ_params_loaded_from_yaml(self):
+        config = load_config("configs/dqn_basic.yaml")
+        assert config.agent.params.get("dqn_use_memory_target_known") is False
+        assert config.agent.params.get("dqn_use_memory_shaping") is False
+        assert config.agent.params.get("organ_sight_k") == 3
+        assert config.agent.params.get("organ_sight_radius") == 5.0
+        assert config.agent.params.get("organ_sight_fov_degrees") == 180.0
+        assert config.agent.params.get("organ_smell_radius") == 7.5
+        assert config.agent.params.get("organ_touch_radius") == 1
+        assert config.agent.params.get("organ_rhythm_period") == 100.0
+
+
 class TestBuildSimulation:
     def test_build_creates_simulation(self):
         with tempfile.NamedTemporaryFile(

@@ -5,12 +5,12 @@ import torch
 from tolmans_sowbug_playground.agents.dqn_sowbug import (
     ACTION_DIRECTIONS,
     DQNSowbug,
-    compute_state_dim,
 )
 from tolmans_sowbug_playground.core.environment import Environment
 from tolmans_sowbug_playground.core.stimulus import Stimulus, StimulusType
 from tolmans_sowbug_playground.systems.drives import DriveType
 from tolmans_sowbug_playground.systems.motor import Direction
+from tolmans_sowbug_playground.systems.organs import OrganConfig, compute_organ_state_dim
 
 
 class TestDQNSowbugCreation:
@@ -26,8 +26,8 @@ class TestDQNSowbugCreation:
         assert bug.position == (3, 7)
 
     def test_state_dim(self):
-        # 3 drives + 3 satiety + 5 passable + 6 memory dir + 5*3*3 perceptions = 62
-        assert compute_state_dim(3) == 62
+        config = OrganConfig(sight_k=3)
+        assert compute_organ_state_dim(config) == 87
 
     def test_action_directions_count(self):
         assert len(ACTION_DIRECTIONS) == 5
@@ -35,77 +35,67 @@ class TestDQNSowbugCreation:
 
 class TestStateEncoding:
     def test_encode_state_shape(self):
-        bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
+        bug = DQNSowbug(position=(5, 5))
         env = Environment(width=20, height=20)
         bug.perceive(env)
         state = bug._encode_state()
-        assert state.shape == (62,)
+        assert state.shape == (87,)
         assert state.dtype == torch.float32
 
     def test_drive_levels_in_state(self):
-        bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
+        """Drives are in the proprioception organ channel."""
+        bug = DQNSowbug(position=(5, 5))
         bug.drive_system.drives[DriveType.HUNGER].level = 0.7
         bug.drive_system.drives[DriveType.THIRST].level = 0.3
         bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.1
         env = Environment(width=20, height=20)
         bug.perceive(env)
         state = bug._encode_state()
-        assert abs(state[0].item() - 0.7) < 1e-5
-        assert abs(state[1].item() - 0.3) < 1e-5
-        assert abs(state[2].item() - 0.1) < 1e-5
+        obs = bug._last_organ_obs
+        # Drives are first 3 dims of proprioception
+        assert abs(obs.proprioception[0].item() - 0.7) < 1e-5
+        assert abs(obs.proprioception[1].item() - 0.3) < 1e-5
+        assert abs(obs.proprioception[2].item() - 0.1) < 1e-5
 
     def test_passable_directions_encoded(self):
-        bug = DQNSowbug(position=(0, 0), dqn_perception_k=3)
+        """Action validity is in the proprioception organ channel."""
+        bug = DQNSowbug(position=(0, 0))
         env = Environment(width=20, height=20)
         bug.perceive(env)
         state = bug._encode_state()
-        # At (0,0): NORTH blocked (y=-1), WEST blocked (x=-1)
-        # Passable indices: 6=N, 7=S, 8=E, 9=W, 10=STAY (after 3 drives + 3 satiety)
-        assert state[6].item() == 0.0   # NORTH blocked
-        assert state[7].item() == 1.0   # SOUTH passable
-        assert state[8].item() == 1.0   # EAST passable
-        assert state[9].item() == 0.0   # WEST blocked
-        assert state[10].item() == 1.0  # STAY always passable
+        obs = bug._last_organ_obs
+        # Validity mask starts at offset 13 in proprioception (3 drives + 3 satiety + 5 orient + 2 disp)
+        assert obs.proprioception[13].item() == 0.0  # NORTH blocked
+        assert obs.proprioception[14].item() == 1.0  # SOUTH passable
+        assert obs.proprioception[15].item() == 1.0  # EAST passable
+        assert obs.proprioception[16].item() == 0.0  # WEST blocked
+        assert obs.proprioception[17].item() == 1.0  # STAY always passable
 
-    def test_perceptions_encoded(self):
-        bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
+    def test_food_perception_in_sight_organ(self):
+        bug = DQNSowbug(position=(5, 5))
         env = Environment(width=20, height=20)
         food = Stimulus(StimulusType.FOOD, (5, 3), intensity=1.0, radius=6.0)
         env.add_stimulus(food)
         bug.perceive(env)
-        state = bug._encode_state()
-        # First perception slot after drives(3) + satiety(3) + passable(5) + memory_dir(6) = 17
-        # FOOD is first stimulus type, first perception: intensity at index 17
-        assert state[17].item() > 0.0  # perceived intensity > 0
+        bug._encode_state()
+        obs = bug._last_organ_obs
+        # FOOD is first sight family, first slot: intensity > 0
+        assert obs.sight[0].item() > 0.0
 
-    def test_memory_direction_encoded(self):
-        bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
+    def test_organ_obs_stored_after_encode(self):
+        bug = DQNSowbug(position=(5, 5))
         env = Environment(width=20, height=20)
         bug.perceive(env)
+        bug._encode_state()
+        assert bug._last_organ_obs is not None
 
-        # No memories yet — direction features should be zero
-        state = bug._encode_state()
-        # Memory direction starts at index 11 (after 3+3+5), 6 dims
-        assert state[11:17].sum().item() == 0.0
-
-        # Record a food memory at (15, 10)
-        bug.memory_system.record_experience(
-            (15, 10), StimulusType.FOOD, 1.0, 1.0
-        )
-        state = bug._encode_state()
-        # HUNGER direction (indices 11, 12) should now point toward (15, 10)
-        dx = state[11].item()
-        dy = state[12].item()
-        assert dx > 0  # food is to the east (x=15 > x=5)
-        assert dy > 0  # food is to the south (y=10 > y=5)
-
-    def test_zero_perceptions_padded(self):
-        bug = DQNSowbug(position=(5, 5), dqn_perception_k=3)
+    def test_no_stimuli_sight_zeros(self):
+        bug = DQNSowbug(position=(5, 5))
         env = Environment(width=20, height=20)
         bug.perceive(env)
-        state = bug._encode_state()
-        # All perception slots should be zero (no stimuli)
-        assert state[17:].sum().item() == 0.0
+        bug._encode_state()
+        obs = bug._last_organ_obs
+        assert obs.sight.sum().item() == 0.0
 
 
 class TestDecideAndAct:
@@ -153,7 +143,6 @@ class TestDecideAndAct:
     def test_transition_next_state_is_post_action_snapshot(self):
         bug = DQNSowbug(position=(5, 5), dqn_eps_start=0.0, dqn_eps_end=0.0)
         env = Environment(width=20, height=20)
-        # Put food at (6,5): moving EAST lands on the stimulus position.
         food = Stimulus(StimulusType.FOOD, (6, 5), intensity=1.0, radius=6.0)
         env.add_stimulus(food)
 
@@ -163,10 +152,11 @@ class TestDecideAndAct:
         bug.post_act(env)
 
         transition = bug._dqn.memory.buffer[0]
-        # FOOD first slot starts at 17: [intensity, dir_x, dir_y]
-        # At the stimulus location, encoded direction should be exactly (0, 0).
-        assert abs(transition.next_state[18].item()) < 1e-6
-        assert abs(transition.next_state[19].item()) < 1e-6
+        # After moving to (6,5) where food is, the sight organ direction to
+        # food should be (0, 0) because we are on top of it.
+        # FOOD sight slot: [intensity, dir_x, dir_y] at indices 0, 1, 2
+        assert abs(transition.next_state[1].item()) < 1e-6  # dir_x
+        assert abs(transition.next_state[2].item()) < 1e-6  # dir_y
 
 
 class TestRewardComputation:
@@ -215,7 +205,11 @@ class TestRewardComputation:
 
     def test_memory_approach_shaping(self):
         """When food is out of perception range, memory guides the agent."""
-        bug = DQNSowbug(position=(0, 5), perception_radius=3.0)
+        bug = DQNSowbug(
+            position=(0, 5),
+            perception_radius=3.0,
+            dqn_use_memory_shaping=True,
+        )
         env = Environment(width=20, height=20)
         # No food in environment — but agent remembers food at (10, 5)
         bug.memory_system.record_experience(
@@ -386,6 +380,22 @@ class TestRewardComputation:
         comps = bug.get_state()["reward_components"]
         assert comps["urgent_explore_bonus"] > 0.0
 
+    def test_default_organs_mode_ignores_memory_for_target_known(self):
+        bug = DQNSowbug(position=(5, 5), dqn_urgent_explore_level=0.7)
+        env = Environment(width=20, height=20)
+        bug.memory_system.record_experience((10, 5), StimulusType.FOOD, 1.0, 1.0)
+        bug.drive_system.drives[DriveType.HUNGER].level = 0.9
+        bug.drive_system.drives[DriveType.THIRST].level = 0.0
+        bug.drive_system.drives[DriveType.TEMPERATURE].level = 0.0
+
+        bug.perceive(env)
+        bug.decide()
+        bug.act(Direction.EAST, env)
+        bug.post_act(env)
+
+        comps = bug.get_state()["reward_components"]
+        assert comps["urgent_explore_bonus"] > 0.0
+
     def test_unknown_urgent_target_stay_gets_search_penalty(self):
         bug = DQNSowbug(position=(5, 5), dqn_urgent_explore_level=0.7)
         env = Environment(width=20, height=20)
@@ -402,7 +412,7 @@ class TestRewardComputation:
         assert comps["urgent_explore_penalty"] > 0.0
 
     def test_high_urgency_stay_incur_stasis_penalty_even_with_known_target(self):
-        bug = DQNSowbug(position=(5, 5))
+        bug = DQNSowbug(position=(5, 5), dqn_use_memory_target_known=True)
         env = Environment(width=20, height=20)
         # Seed memory so target is known (urgent-search path is off)
         bug.memory_system.record_experience((10, 5), StimulusType.FOOD, 1.0, 1.0)
@@ -475,6 +485,33 @@ class TestGetState:
         assert "urgent_explore_bonus" in state["reward_components"]
         assert "urgent_explore_penalty" in state["reward_components"]
         assert "stasis_penalty" in state["reward_components"]
+
+    def test_state_has_organ_metrics(self):
+        bug = DQNSowbug(position=(5, 5))
+        env = Environment(width=20, height=20)
+        bug.perceive(env)
+        bug.decide()
+        bug.act(Direction.STAY, env)
+        bug.post_act(env)
+        state = bug.get_state()
+        assert "organ_metrics" in state
+        om = state["organ_metrics"]
+        for key in ["sight_mag", "smell_mag", "touch_mag", "proprio_mag", "rhythm_mag"]:
+            assert key in om
+
+    def test_state_sight_perceptions_respect_forward_fov(self):
+        bug = DQNSowbug(position=(5, 5), organ_sight_fov_degrees=180.0)
+        env = Environment(width=20, height=20)
+        env.add_stimulus(Stimulus(StimulusType.FOOD, (5, 3), intensity=1.0, radius=6.0))
+        env.add_stimulus(Stimulus(StimulusType.FOOD, (5, 7), intensity=1.0, radius=6.0))
+
+        bug.perceive(env)  # default orientation is NORTH
+        state = bug.get_state()
+        seen_positions = {
+            tuple(p["stimulus_position"]) for p in state.get("sight_perceptions", [])
+        }
+        assert (5, 3) in seen_positions
+        assert (5, 7) not in seen_positions
 
 
 class TestTraining:

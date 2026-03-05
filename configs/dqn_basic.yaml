@@ -72,7 +72,16 @@ agent:
   dqn_batch_size: 128
   dqn_replay_capacity: 50000
   dqn_optimize_every: 1
-  dqn_perception_k: 3
+  # Keep organs-first learning pure by default (disable symbolic memory scaffolding)
+  dqn_use_memory_target_known: false
+  dqn_use_memory_shaping: false
+  # Organ-based state encoder
+  organ_sight_k: 3
+  organ_sight_radius: 5.0
+  organ_sight_fov_degrees: 180.0
+  organ_smell_radius: 7.5
+  organ_touch_radius: 1
+  organ_rhythm_period: 100.0
   # Urgent-search behavior when critical target is unknown
   dqn_urgent_explore_level: 0.7
   dqn_urgent_explore_novelty_bonus: 0.02

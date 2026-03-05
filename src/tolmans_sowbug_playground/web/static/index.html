@@ -22,7 +22,7 @@
                     <h3 class="chart-label">Trajectory</h3>
                     <canvas id="trajectory-canvas" height="260" aria-label="Agent trajectory chart showing cumulative path with cardinal directions" role="img"></canvas>
                     <h3 class="chart-label">Cognitive Map Replay</h3>
-                    <p id="replay-hint">Hover the Drives chart to scrub replay history.</p>
+                    <p id="replay-hint">Hover the Satisfaction chart to scrub replay history.</p>
                     <canvas id="cogmap-replay-canvas" height="260"
                             aria-label="Cognitive map replay showing spatial memory at hovered tick"
                             role="img"></canvas>
@@ -66,10 +66,6 @@
             <!-- Grid area: charts (side by side) -->
             <div id="charts-area">
                 <div class="chart-container">
-                    <h3 class="chart-label">Drives over time</h3>
-                    <canvas id="drive-chart-canvas" height="260" aria-label="Drive levels over time chart" role="img"></canvas>
-                </div>
-                <div class="chart-container">
                     <h3 class="chart-label">Satisfaction Level</h3>
                     <canvas id="satiety-chart-canvas" height="260" aria-label="Satisfaction level over time chart (rolling average of combined satiety)" role="img"></canvas>
                 </div>
@@ -81,6 +77,26 @@
                     <h3 class="chart-label">Memory Decay</h3>
                     <canvas id="memory-chart-canvas" height="260" aria-label="Memory decay over time chart" role="img"></canvas>
                 </div>
+                <div class="chart-container">
+                    <h3 class="chart-label">Sight Activity</h3>
+                    <canvas id="organ-sight-chart-canvas" height="200" aria-label="Sight organ activity over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 class="chart-label">Smell Activity</h3>
+                    <canvas id="organ-smell-chart-canvas" height="200" aria-label="Smell organ activity over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 class="chart-label">Touch Activity</h3>
+                    <canvas id="organ-touch-chart-canvas" height="200" aria-label="Touch organ activity over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 class="chart-label">Proprioception Activity</h3>
+                    <canvas id="organ-proprio-chart-canvas" height="200" aria-label="Proprioception organ activity over time chart" role="img"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 class="chart-label">Rhythm Activity</h3>
+                    <canvas id="organ-rhythm-chart-canvas" height="200" aria-label="Rhythm organ activity over time chart" role="img"></canvas>
+                </div>
                 <div class="chart-container chart-wide" id="reward-components-chart-container">
                     <h3 class="chart-label">Reward Components (Per Tick)</h3>
                     <canvas id="reward-components-chart-canvas" height="280" aria-label="Per-tick reward decomposition chart for drive reduction shaping and urgency penalty" role="img"></canvas>
@@ -89,15 +105,9 @@
                     <h3 class="chart-label">Cumulative Reward</h3>
                     <canvas id="reward-chart-canvas" height="260" aria-label="Cumulative reward over time chart" role="img"></canvas>
                 </div>
-                <div class="chart-container" id="loss-chart-container">
-                    <h3 class="chart-label">Training Loss</h3>
-                    <canvas id="loss-chart-canvas" height="260" aria-label="DQN training loss over time chart" role="img"></canvas>
-                </div>
                 <details class="panel-help">
                     <summary>?</summary>
                     <dl>
-                        <dt>Drive Chart</dt>
-                        <dd>Plots the drive level for hunger, thirst and temperature over simulation ticks. Drives rise at a fixed rate and drop when the agent reaches the matching stimulus.</dd>
                         <dt>Satisfaction Level</dt>
                         <dd>Plots a rolling average of combined satiety across hunger, thirst, and temperature. It is a compact proxy for recent drive fulfillment (higher means the agent has been satisfying needs more consistently).</dd>
                         <dt>Resource Gathering</dt>
@@ -108,10 +118,8 @@
                         <dd>Shows the running sum of exact per-tick rewards emitted by the DQN agent. A rising curve means the policy is improving expected outcomes. Only visible when using the DQN agent.</dd>
                         <dt>Reward Components (DQN)</dt>
                         <dd>Decomposes each tick reward into drive reduction, shaping, urgency penalty, off-target penalty, and urgent-search terms (bonus for novelty plus penalties for staying/looping when an urgent target is still unknown).</dd>
-                        <dt>Training Loss (DQN)</dt>
-                        <dd>Plots the Huber loss from DQN optimization. Raw loss is shown faintly with a rolling average overlay. Should start noisy then decrease and stabilize as Q-values converge. Only visible when using the DQN agent.</dd>
                         <dt>Cognitive Map Replay</dt>
-                        <dd>Shows which stimuli the agent remembers at each grid position. Cell color indicates stimulus type; opacity indicates memory strength. Hover over the Drive chart to scrub through memory history. The orange dot marks the agent's position at that tick.</dd>
+                        <dd>Shows which stimuli the agent remembers at each grid position. Cell color indicates stimulus type; opacity indicates memory strength. Hover over the Satisfaction chart to scrub through memory history. The orange dot marks the agent's position at that tick.</dd>
                     </dl>
                 </details>
             </div>
@@ -127,6 +135,21 @@
                             <span id="run-state-badge" class="state-badge state-paused">Paused</span>
                             <span id="conn-state-badge" class="state-badge state-connecting">Connecting</span>
                         </div>
+                        <div id="mode-row">
+                            <label for="ui-mode-select">Mode</label>
+                            <select id="ui-mode-select" aria-label="UI interaction mode">
+                                <option value="build">Build</option>
+                                <option value="run" selected>Run</option>
+                                <option value="inspect">Inspect</option>
+                            </select>
+                            <span id="ui-mode-badge" class="state-badge state-run">Run</span>
+                        </div>
+                        <div id="sandbox-row">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="edit-while-paused" checked>
+                                Edit while paused
+                            </label>
+                        </div>
                         <div id="btn-group">
                             <button id="btn-play" aria-label="Play simulation">Play</button>
                             <button id="btn-pause" aria-label="Pause simulation">Pause</button>
@@ -135,6 +158,11 @@
                         </div>
                         <div id="checkpoint-controls">
                             <button id="btn-save-model" aria-label="Save trained model checkpoint">Save Model</button>
+                            <button id="btn-load-model" aria-label="Load saved model checkpoint into fresh sowbug">Load Model</button>
+                            <button id="btn-refresh-models" aria-label="Refresh checkpoint list">Refresh</button>
+                            <select id="model-select" aria-label="Saved model checkpoints">
+                                <option value="">Latest checkpoint</option>
+                            </select>
                             <span id="model-save-status" class="hint">No checkpoint saved</span>
                         </div>
                         <div id="speed-control">
@@ -187,7 +215,7 @@
                                 <dt>Cognitive Map</dt>
                                 <dd>Diamond markers at remembered stimulus locations, connected by purple edge lines. Opacity reflects memory strength.</dd>
                                 <dt>Perception</dt>
-                                <dd>Dashed sensory radius circle and lines to detected stimuli, colored by type.</dd>
+                                <dd>Organ range rings (sight, smell, touch), a forward sight cone (FOV), and LOS lines to currently seen stimuli.</dd>
                                 <dt>Density Field</dt>
                                 <dd>KDE heatmap of reward-weighted experience. Brighter cells have more accumulated value.</dd>
                                 <dt>VTE Arrows</dt>
@@ -229,6 +257,49 @@
                 <!-- Tier 2: Live Status -->
                 <div class="sidebar-group">
                     <div class="sidebar-group-label">Status</div>
+                    <div class="panel" id="organ-diagnostics">
+                        <h2>Organ Diagnostics</h2>
+                        <div class="organ-bar">
+                            <label>Sight</label>
+                            <div class="bar-bg"><div id="organ-sight-bar" class="bar-fill organ-sight"></div></div>
+                            <span id="organ-sight-val">0.00</span>
+                        </div>
+                        <div class="organ-bar">
+                            <label>Smell</label>
+                            <div class="bar-bg"><div id="organ-smell-bar" class="bar-fill organ-smell"></div></div>
+                            <span id="organ-smell-val">0.00</span>
+                        </div>
+                        <div class="organ-bar">
+                            <label>Touch</label>
+                            <div class="bar-bg"><div id="organ-touch-bar" class="bar-fill organ-touch"></div></div>
+                            <span id="organ-touch-val">0.00</span>
+                        </div>
+                        <div class="organ-bar">
+                            <label>Proprio</label>
+                            <div class="bar-bg"><div id="organ-proprio-bar" class="bar-fill organ-proprio"></div></div>
+                            <span id="organ-proprio-val">0.00</span>
+                        </div>
+                        <div class="organ-bar">
+                            <label>Rhythm</label>
+                            <div class="bar-bg"><div id="organ-rhythm-bar" class="bar-fill organ-rhythm"></div></div>
+                            <span id="organ-rhythm-val">0.00</span>
+                        </div>
+                        <details class="panel-help">
+                            <summary>?</summary>
+                            <dl>
+                                <dt>Sight</dt>
+                                <dd>Forward-facing LOS-gated intensity/direction vectors per family (rear hemisphere excluded by sight FOV).</dd>
+                                <dt>Smell</dt>
+                                <dd>Non-LOS gradient field for consumable stimulus families (food, water, heat). Wider range, weaker signal.</dd>
+                                <dt>Touch</dt>
+                                <dd>Adjacent obstacle contact flags plus consumable presence/intensity at current cell.</dd>
+                                <dt>Proprio</dt>
+                                <dd>Interoception (drives, satiety), orientation, displacement, and action validity mask.</dd>
+                                <dt>Rhythm</dt>
+                                <dd>Cyclical tick phase and time-since-last-consumption per drive.</dd>
+                            </dl>
+                        </details>
+                    </div>
                     <div class="panel" id="drives-agent">
                         <h2>Drives + Agent</h2>
                         <div class="drives-agent-row">
